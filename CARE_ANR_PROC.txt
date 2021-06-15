@@ -1,0 +1,1156 @@
+PROCEDURE "CARE"."PKG_CARE.PKG_PROCEDURE::CARE_ANR_PROC" ( )
+   LANGUAGE SQLSCRIPT
+    AS
+BEGIN
+   /*************************************
+       Write your procedure logic 
+   *************************************/
+DECLARE check_1 VARCHAR(1);
+DECLARE positive_count INTEGER;
+DECLARE negative_count INTEGER;
+DECLARE count_training INTEGER;
+DECLARE min_ga_date TIMESTAMP;
+DECLARE V_MAX_TIME_IVR TIMESTAMP;
+DECLARE V_GA_MAX_TIME TIMESTAMP;
+DECLARE V_LR_MAX TIMESTAMP;
+DECLARE max_row_pos INTEGER;  
+DECLARE check_12 VARCHAR(1);
+DECLARE V_MODEL TABLE ("ROW_INDEX" INTEGER,"KEY" NVARCHAR(1000),"VALUE" NVARCHAR(1000));
+DECLARE V_VARIABLE_IMPORTANCE TABLE ("VARIABLE_NAME" NVARCHAR(256), IMPORTANCE DOUBLE);
+DECLARE V_CONFUSION_MATRIX TABLE ("ACTUAL_CLASS" NVARCHAR(1000), "PREDICTED_CLASS" NVARCHAR(1000), "COUNT" INTEGER);
+DECLARE V_STATS TABLE ("STAT_NAME" NVARCHAR(1000), "STAT_VALUE" NVARCHAR(1000));
+DECLARE V_CROSS_VALIDATE TABLE ("PARAM_NAME" NVARCHAR(256), "INT_VALUE" INTEGER ,  "DOUBLE_VALUE" DOUBLE , "STRING_VALUE" NVARCHAR(1000));
+DECLARE V_PREDICT TABLE ("Account_Id" INTEGER, "SCORE" NVARCHAR(100) , "CONFIDENCE" DOUBLE );
+DECLARE V_AUC TABLE ("STAT_NAME" NVARCHAR(100), "STAT_VALUE" DOUBLE);
+DECLARE V_ROC TABLE ("ID" INTEGER , "FPR" DOUBLE, "TPR" DOUBLE);
+DECLARE V_COEFF_LOG TABLE ("VARIABLE_NAME" Nvarchar(1000),"COEFFICIENT" DOUBLE,"Z_SCORE" DOUBLE, "P_VALUE" DOUBLE);
+DECLARE V_STATS_LOG TABLE ("STAT_NAME" NVARCHAR(256), "STAT_VALUE" NVARCHAR(1000));
+DECLARE V_PMML_LOG TABLE ("ROW_INDEX" INTEGER, "MODEL_CONTENT" CLOB);
+DECLARE V_PLACE_LOG TABLE ("PARAM_NAME" NVARCHAR(256), "INT_VALUE" INTEGER, "DOUBLE_VALUE" DOUBLE , "STRING_VALUE" NVARCHAR(1000));
+DECLARE V_OUTPUT_LOG TABLE ("Account_Id" INTEGER, "SCORE" DOUBLE , "CLASS" VARCHAR(1));
+
+
+/**************************************************
+Fetching Avg. of Home_Square_Footage by Eliminating nulls and Outliers and on the basis of Premise_Zip, Dwelling_Type and Owner_Renter
+***************************************************/
+
+V_AGR_ZDO_HOME_SQUARE = select "Premise_Zip",
+                                                case when TRIM("Dwelling_Type") = '' then 'Unknown' else "Dwelling_Type" end as "Dwelling_Type",
+                                                "Owner_Renter"
+                                                , AVG(CAST("Home_Square_Footage" as BIGINT)) as "imputed_home_square_footage"      
+                                                       from (
+                                              select "Premise_Zip",  "Dwelling_Type", "Owner_Renter","Home_Square_Footage" from (
+                                              select "Premise_Zip",  "Dwelling_Type", "Owner_Renter",CASE WHEN TRIM("Home_Square_Footage") = '' THEN null
+                                               ELSE  LTRIM(TRIM("Home_Square_Footage"),0) end  as "Home_Square_Footage"
+                                                from
+                                               "ANALYTICS_DW"."Acxiom") where trim("Home_Square_Footage") != '' and CAST(LTRIM("Home_Square_Footage",'0') as INTEGER)
+                                                < '20000' and CAST(LTRIM("Home_Square_Footage",'0') as INTEGER) > '300')
+                                               group by "Premise_Zip",  "Dwelling_Type", "Owner_Renter";
+      
+
+
+V_AGR_ZDO_LOT_SQUARE = select "Premise_Zip",
+  case when TRIM("Dwelling_Type") = '' then 'unknown' else "Dwelling_Type" end as "Dwelling_Type",
+  "Owner_Renter"
+         ,AVG(CAST("Lot_Square_Footage" as BIGINT)) as "imputed_Lot_square_footage" 
+from (
+     select "Premise_Zip",  "Dwelling_Type", "Owner_Renter",      
+      CASE WHEN TRIM("Lot_Square_Footage") = '' then null else LTRIM(TRIM("Lot_Square_Footage"),0) end as 
+      "Lot_Square_Footage" from
+      "ANALYTICS_DW"."Acxiom" where trim("Lot_Square_Footage") != '' and CAST(LTRIM("Lot_Square_Footage",'0') as INTEGER)
+       < '20000' and CAST(LTRIM("Lot_Square_Footage",'0') as INTEGER) > '300')
+      group by "Premise_Zip",  "Dwelling_Type", "Owner_Renter";
+
+ 
+/**************************************************
+Fetching Avg. of Home_Square_Footage by Eliminating nulls and Outliers and on the basis of Dwelling_Type and Owner_Renter
+***************************************************/ 
+
+V_AGR_DO_HOME_SQUARE = select 
+                                    case when TRIM("Dwelling_Type") = '' then 'Unknown' else "Dwelling_Type" end as "Dwelling_Type",
+                                    "Owner_Renter",
+                                    AVG(CAST("Home_Square_Footage" as BIGINT)) as "imputed_home_square_footage"
+                                  from (
+                                        select "Premise_Zip",  "Dwelling_Type", "Owner_Renter",CASE WHEN TRIM("Home_Square_Footage") = '' THEN null
+                                        ELSE  LTRIM(TRIM("Home_Square_Footage"),0) end  as "Home_Square_Footage"
+                                         from
+                                        "ANALYTICS_DW"."Acxiom" where trim("Home_Square_Footage") != '' and CAST(LTRIM("Home_Square_Footage",'0') as INTEGER)
+                                         < '20000' and CAST(LTRIM("Home_Square_Footage",'0') as INTEGER) > '300')
+                                        group by  "Dwelling_Type", "Owner_Renter";
+                                        
+   
+V_AGR_DO_LOT_SQUARE =     select 
+         case when TRIM("Dwelling_Type") = '' then 'unknown' else "Dwelling_Type" end as "Dwelling_Type",
+         "Owner_Renter",
+         AVG(CAST("Lot_Square_Footage" as BIGINT)) as "imputed_Lot_square_footage" 
+       from (
+      select "Premise_Zip",  "Dwelling_Type" ,"Owner_Renter",CASE WHEN TRIM("Lot_Square_Footage") = '' then null else LTRIM(TRIM("Lot_Square_Footage"),0) end as 
+      "Lot_Square_Footage" from
+      "ANALYTICS_DW"."Acxiom" where trim("Lot_Square_Footage") != '' and CAST(LTRIM("Lot_Square_Footage",'0') as INTEGER)
+       < '20000' and CAST(LTRIM("Lot_Square_Footage",'0') as INTEGER) > '300')
+      group by  "Dwelling_Type", "Owner_Renter";
+                                                
+ /**************************************************
+Fetching Avg. of Home_Square_Footage by Eliminating nulls and Outliers and on the basis of State and City
+***************************************************/ 
+
+
+V_AGR_State_city_HOME_SQUARE = select 
+                                    "Premise_State", "Premise_City",
+                                    AVG(CAST("Home_Square_Footage" as BIGINT)) as "imputed_StateCity_home_square_footage"
+                                  from (
+                                        select "Premise_State", "Premise_City",
+                                        CASE WHEN TRIM("Home_Square_Footage") = '' THEN null
+                                        ELSE  LTRIM(TRIM("Home_Square_Footage"),0) end  as "Home_Square_Footage"
+                                         from
+                                        "ANALYTICS_DW"."Acxiom" where trim("Home_Square_Footage") != '' and CAST(LTRIM("Home_Square_Footage",'0') as INTEGER)
+                                         < '20000' and CAST(LTRIM("Home_Square_Footage",'0') as INTEGER) > '300')
+                                        group by "Premise_State", "Premise_City";
+
+V_AGR_State_city_LOT_SQUARE = select 
+                                    "Premise_State", "Premise_City",
+                                    AVG(CAST("Lot_Square_Footage" as BIGINT)) as "imputed_StateCity_Lot_square_footage"
+                                  from (
+                                        select "Premise_State", "Premise_City",
+                                        CASE WHEN TRIM("Lot_Square_Footage") = '' THEN null
+                                        ELSE  LTRIM(TRIM("Lot_Square_Footage"),0) end  as "Lot_Square_Footage"
+                                         from
+                                        "ANALYTICS_DW"."Acxiom" where trim("Lot_Square_Footage") != '' and CAST(LTRIM("Lot_Square_Footage",'0') as INTEGER)
+                                         < '20000' and CAST(LTRIM("Lot_Square_Footage",'0') as INTEGER) > '300')
+                                        group by "Premise_State", "Premise_City";                                        
+/***********************************************************************
+Fetching Avg. of Home_Square_Footage by Eliminating nulls and Outliers 
+*************************************************************************/ 
+
+V_AGR_OVERALL_HOME_SQUARE =      select 
+                                     AVG(CAST("Home_Square_Footage" as BIGINT)) as "imputed_Overall_home_square_footage" , '1' as "dummy"
+                                  from 
+                                         (
+                                        select "Premise_State", "Premise_City",CASE WHEN TRIM("Home_Square_Footage") = '' THEN null
+                                        ELSE  LTRIM(TRIM("Home_Square_Footage"),0) end  as "Home_Square_Footage"
+                                         from
+                                        "ANALYTICS_DW"."Acxiom" where trim("Home_Square_Footage") != '' and CAST(LTRIM("Home_Square_Footage",'0') as INTEGER)
+                                         < '20000' and CAST(LTRIM("Home_Square_Footage",'0') as INTEGER) > '300');
+                                         
+ 
+V_AGR_OVERALL_LOT_SQUARE =      select 
+                                     AVG(CAST("Lot_Square_Footage" as BIGINT)) as "imputed_Overall_Lot_square_footage" , '1' as "dummy"
+                                  from 
+                                         (
+                                        select "Premise_State", "Premise_City",CASE WHEN TRIM("Lot_Square_Footage") = '' THEN null
+                                        ELSE  LTRIM(TRIM("Lot_Square_Footage"),0) end  as "Lot_Square_Footage"
+                                         from
+                                        "ANALYTICS_DW"."Acxiom" where trim("Lot_Square_Footage") != '' and CAST(LTRIM("Lot_Square_Footage",'0') as INTEGER)
+                                         < '20000' and CAST(LTRIM("Lot_Square_Footage",'0') as INTEGER) > '300');
+
+/*********************************************************************
+CHARGES DATA FOR TRAINING
+*********************************************************************/
+
+
+
+V_CHARGES = select "Account_Id","ChargeMonth","PARTICIPATION_MONTH" ,sum("Charge_Billed_Quantity") as "Charge_Billed_Quantity" from (
+            select "Account_Id","Charge_Billed_Quantity",
+           CAST(CONCAT(CONCAT(CONCAT("Charge_Revenue_Year",'-'),"Charge_Revenue_Month"),'-01') as DATE) as "ChargeMonth",
+           CAST(ADD_DAYS(now(),(1-EXTRACT(DAY FROM now()))) as DATE) as "PARTICIPATION_MONTH" 
+            from "CUSTOMER_DW"."Charge" where TRIM(UPPER("Charge_Quantity_Type_Cd")) IN ('KWH','KW') and "Charge_Amount_Dollars" < '1000000' )
+            GROUP BY "Account_Id","ChargeMonth","PARTICIPATION_MONTH" 
+            having "ChargeMonth" > ADD_MONTHS("PARTICIPATION_MONTH",-13) and "ChargeMonth" <= "PARTICIPATION_MONTH" ;
+
+V_CHARGE_BUCKET = select "Account_Id","Charge_Billed_Quantity","ChargeMonth",
+                                            CASE WHEN "ChargeMonth" >= "PARTICIPATION_MONTH3" THEN '3'
+                                            WHEN "ChargeMonth" >= "PARTICIPATION_MONTH6" and "ChargeMonth" < "PARTICIPATION_MONTH3" THEN '6'
+                                            WHEN "ChargeMonth" >= "PARTICIPATION_MONTH9" and "ChargeMonth" < "PARTICIPATION_MONTH6" THEN '9'
+                                            WHEN "ChargeMonth" >= "PARTICIPATION_MONTH12" and "ChargeMonth" < "PARTICIPATION_MONTH9" THEN '12'
+                                            END as "Month_Bucket","PARTICIPATION_MONTH" from (
+                                            select "Account_Id","Charge_Billed_Quantity","ChargeMonth","PARTICIPATION_MONTH",ADD_MONTHS("PARTICIPATION_MONTH",-3) as "PARTICIPATION_MONTH3",
+                                             ADD_MONTHS("PARTICIPATION_MONTH",-6) as "PARTICIPATION_MONTH6",
+                                             ADD_MONTHS("PARTICIPATION_MONTH",-9) as "PARTICIPATION_MONTH9",
+                                             ADD_MONTHS("PARTICIPATION_MONTH",-12) as "PARTICIPATION_MONTH12"
+                                             from 
+                                            :V_CHARGES);
+                                            
+
+V_CHARGES_FEATURE_3MON = select "Account_Id",sum("Charge_Billed_Quantity") as "Charges_3months" from (
+                                         select "Account_Id","Charge_Billed_Quantity" from :V_CHARGE_BUCKET WHERE "Month_Bucket" = '3') GROUP BY "Account_Id";
+                                    
+                                    
+V_CHARGES_FEATURE_6MON = select "Account_Id",sum("Charge_Billed_Quantity") as "Charges_6months" from (
+                                         select "Account_Id","Charge_Billed_Quantity" from :V_CHARGE_BUCKET WHERE   "Month_Bucket" = '6') GROUP BY "Account_Id";
+                                      
+
+V_CHARGES_FEATURE_9MON = select "Account_Id",sum("Charge_Billed_Quantity") as "Charges_9months" from (
+                                         select "Account_Id","Charge_Billed_Quantity" from :V_CHARGE_BUCKET WHERE  "Month_Bucket" = '9') GROUP BY "Account_Id";     
+                                         
+V_CHARGES_FEATURE_12MON = select "Account_Id",sum("Charge_Billed_Quantity") as "Charges_12months" from (
+                                         select "Account_Id","Charge_Billed_Quantity" from :V_CHARGE_BUCKET WHERE  "Month_Bucket" = '12') GROUP BY "Account_Id";    
+                                         
+V_CREATE_SD_CHARGES = select "Account_Id",STDDEV_SAMP( "Charge_Billed_Quantity" ) AS "Charge_Variance" from :V_CHARGE_BUCKET
+                                GROUP BY "Account_Id";
+
+V_CHARGES_FEATURE_JN = select a."Account_Id",
+                                      CASE WHEN "Charges_3months" is null then '0' else "Charges_3months" end as "Charges_3months"
+                                       , CASE WHEN "Charges_6months" is null then '0' else "Charges_6months" end as "Charges_6months",
+                                       CASE WHEN "Charges_9months" is null then '0' else "Charges_9months" end as "Charges_9months",
+                                       CASE WHEN "Charges_12months" is null then '0' else "Charges_12months" end as "Charges_12months"
+                                      from  :V_CHARGES_FEATURE_3MON a
+                                      LEFT OUTER JOIN 
+                                      :V_CHARGES_FEATURE_6MON b on a."Account_Id" = b."Account_Id" 
+                                      LEFT OUTER JOIN
+                                      :V_CHARGES_FEATURE_9MON c on a."Account_Id" = c."Account_Id" 
+                                      LEFT OUTER JOIN
+                                      :V_CHARGES_FEATURE_12MON d on a."Account_Id" = d."Account_Id";
+                                
+                                      
+                                      
+V_CHARGES_FINAL_FEATURE =      select a."Account_Id",
+                                        "Charges_3months" as "Charges_3months_448",
+                                          "Charges_6months" as "Charges_6months_448",
+                                          "Charges_9months" as "Charges_9months_448",
+                                          "Charges_12months" as "Charges_12months_448",
+                                          "Charges_3months" as "Charges_3months_445",
+                                          "Charges_6months" as "Charges_6months_445",
+                                          "Charges_9months" as "Charges_9months_445",
+                                          "Charges_12months" as "Charges_12months_445",
+                                          "Charges_3months" as "Charges_3months_443",
+                                          "Charges_6months" as "Charges_6months_443",
+                                          "Charges_9months" as "Charges_9months_443",
+                                          "Charges_12months" as "Charges_12months_443",
+                                          "Charges_3months" as "Charges_3months_446",
+                                          "Charges_6months" as "Charges_6months_446",
+                                          "Charges_9months" as "Charges_9months_446",
+                                          "Charges_12months" as "Charges_12months_446",
+                                          "Charges_3months" as "Charges_3months_444",
+                                          "Charges_6months" as "Charges_6months_444",
+                                          "Charges_9months" as "Charges_9months_444",
+                                          "Charges_12months" as "Charges_12months_444",
+                                          "Charges_3months" as "Charges_3months_399",
+                                          "Charges_6months" as "Charges_6months_399",
+                                          "Charges_9months" as "Charges_9months_399",
+                                          "Charges_12months" as "Charges_12months_399",
+                                          "Charges_3months" as "Charges_3months_456",
+                                          "Charges_6months" as "Charges_6months_456",
+                                          "Charges_9months" as "Charges_9months_456",
+                                          "Charges_12months" as "Charges_12months_456",
+                                          "Charges_3months" as "Charges_3months_808",
+                                          "Charges_6months" as "Charges_6months_808",
+                                          "Charges_9months" as "Charges_9months_808",
+                                          "Charges_12months" as "Charges_12months_808",
+                                          "Charges_3months" as "Charges_3months_810",
+                                          "Charges_6months" as "Charges_6months_810",
+                                          "Charges_9months" as "Charges_9months_810",
+                                          "Charges_12months" as "Charges_12months_810",
+                                          "Charges_3months" as "Charges_3months_392",
+                                          "Charges_6months" as "Charges_6months_392",
+                                          "Charges_9months" as "Charges_9months_392",
+                                          "Charges_12months" as "Charges_12months_392",
+                                          "Charges_3months" as "Charges_3months_395",
+                                          "Charges_6months" as "Charges_6months_395",
+                                          "Charges_9months" as "Charges_9months_395",
+                                          "Charges_12months" as "Charges_12months_395",
+                                          "Charges_3months" as "Charges_3months_459",
+                                          "Charges_6months" as "Charges_6months_459",
+                                          "Charges_9months" as "Charges_9months_459",
+                                          "Charges_12months" as "Charges_12months_459",
+                                          "Charges_3months" as "Charges_3months_396",
+                                         "Charges_6months" as "Charges_6months_396",
+                                         "Charges_9months" as "Charges_9months_396",
+                                        "Charges_12months" as "Charges_12months_396",
+                                        "Charges_3months" as "Charges_3months_394",
+                                         "Charges_6months" as "Charges_6months_394",
+                                         "Charges_9months" as "Charges_9months_394",
+                                        "Charges_12months" as "Charges_12months_394",
+                                        "Charges_3months" as "Charges_3months_426",
+                                         "Charges_6months" as "Charges_6months_426",
+                                         "Charges_9months" as "Charges_9months_426",
+                                        "Charges_12months" as "Charges_12months_426",
+                                        "Charges_3months" as "Charges_3months_806",
+                                         "Charges_6months" as "Charges_6months_806",
+                                         "Charges_9months" as "Charges_9months_806",
+                                        "Charges_12months" as "Charges_12months_806",
+                                        "Charges_3months" as "Charges_3months_880",
+                                         "Charges_6months" as "Charges_6months_880",
+                                         "Charges_9months" as "Charges_9months_880",
+                                        "Charges_12months" as "Charges_12months_880",
+                                        "Charge_Variance" as "Charge_Variance_448",
+                                        "Charge_Variance" as "Charge_Variance_445",
+                                        "Charge_Variance" as "Charge_Variance_443",
+                                        "Charge_Variance" as "Charge_Variance_446",
+                                        "Charge_Variance" as "Charge_Variance_444",
+                                        "Charge_Variance" as "Charge_Variance_399",
+                                        "Charge_Variance" as "Charge_Variance_456",
+                                        "Charge_Variance" as "Charge_Variance_808",
+                                        "Charge_Variance" as "Charge_Variance_810",
+                                        "Charge_Variance" as "Charge_Variance_392",
+                                        "Charge_Variance" as "Charge_Variance_395",
+                                        "Charge_Variance" as "Charge_Variance_459",
+                                        "Charge_Variance" as "Charge_Variance_806",
+                                        "Charge_Variance" as "Charge_Variance_394",
+                                        "Charge_Variance" as "Charge_Variance_396",
+                                        "Charge_Variance" as "Charge_Variance_426",
+                                        "Charge_Variance" as "Charge_Variance_880"
+                                          FROM :V_CHARGES_FEATURE_JN a
+                                          LEFT OUTER JOIN
+                                          :V_CREATE_SD_CHARGES b
+                                          on a."Account_Id" = b."Account_Id";
+                                      
+                                      
+                                         
+/**********************************************************************
+LOG RECOMMENDATION DATA FOR TRAINING
+***********************************************************************/
+
+
+V_SMART_WINDOW_ALL = select "SRC_ACCT_ID" as "Account_Number","Group_Id" as "Product_Id","SRC_SYS_CD" as "Source_System_Cd","ACTION_CD" as "Acceptance_flag","CREATE_TS" as "DateTime"
+                                                        from "SMARTWINDOWS"."SW_ACTIVITY" a
+                                                        INNER JOIN
+                                                        "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MAP_PRODUCT"  b
+                                                        on a."PROGRAM_CD" = b."Lookup_Value" where "ACTION_CD" IN ('A','D');
+                     
+V_LOG_RECOMM_ALL =       select "Account_Number", "Group_Id" as "Product_Id","DateTime","Source_System_Cd","Acceptance_flag"
+               from "CARE"."PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_LOG_RECOMMENDATIONS" a
+                INNER JOIN 
+                "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MAP_PRODUCT" b 
+                on a."Product_Id" = b."Sub_Group_Id";
+                                    
+                                    
+LOG_RECOMMENDATION =  select b."Account_Id","Product_Id","DateTime",CASE WHEN CAST("Acceptance_flag" as NVARCHAR(1)) = '0' THEN 'D'
+                                WHEN CAST("Acceptance_flag" as NVARCHAR(1)) = '1' THEN 'A' ELSE CAST("Acceptance_flag" as NVARCHAR(1)) END  as "Acceptance_flag" from (
+                                            select "Account_Number","Product_Id","DateTime","Source_System_Cd",CAST("Acceptance_flag" as NVARCHAR(1)) as "Acceptance_flag" from :V_SMART_WINDOW_ALL
+                                            UNION
+                                            select CAST( "Account_Number" as NVARCHAR(12)) as "Account_Id","Product_Id","DateTime","Source_System_Cd",CAST("Acceptance_flag" as NVARCHAR(1)) as "Acceptance_flag" from :V_LOG_RECOMM_ALL) a
+                                            INNER JOIN 
+                                            "CUSTOMER_DW"."Customer_Account" b
+                                            on a."Account_Number" = concat(rtrim(b."Source_Account_Id"), CASE WHEN rtrim(b."Source_Account_Id2") != '' THEN LPAD( rtrim(b."Source_Account_Id2"),2,0) ELSE rtrim(b."Source_Account_Id2") END )
+                                            and a."Source_System_Cd" = trim(b."Source_System_Cd");
+
+
+LOG_RECOMMENDATION_SUM_REJECTION = select "Account_Id","Product_Id",count("Acceptance_flag") as "Rejection_Count" from (  
+                                                      select * from :LOG_RECOMMENDATION
+                                                      where "Acceptance_flag"IN ('N')) GROUP BY "Account_Id","Product_Id";
+                                                      
+
+
+LOG_RECOMMENDATION_LATEST_FLAG = select "Account_Id","Product_Id","Acceptance_flag" from  (
+                                                select "Account_Id","Product_Id","Acceptance_flag",
+                                                row_number() over (partition by "Account_Id","Product_Id" order by "Account_Id","Product_Id","DateTime" DESC) as "RN"
+                                                from :LOG_RECOMMENDATION) where "RN"='1';
+                                                
+LOG_RECOMMENDATION_COMBINED_ALL = select a."Account_Id",a."Product_Id", a."Acceptance_flag" as "Latest_flag", b."Rejection_Count" from
+                              :LOG_RECOMMENDATION_LATEST_FLAG  a
+                              LEFT OUTER JOIN
+                              :LOG_RECOMMENDATION_SUM_REJECTION b
+                              on a."Account_Id" = b."Account_Id" and a."Product_Id" = b."Product_Id"; 
+                                                                        
+                                                                        
+LOG_RECOMMENDATION_FINAL =      select a."Account_Id",b."Latest_flag" as "Latest_flag_448", b."Rejection_Count" as "Rej448",
+                                    c."Latest_flag" as "Latest_flag_443", c."Rejection_Count" as "Rej443",
+                                    d."Latest_flag" as "Latest_flag_446", d."Rejection_Count" as "Rej446",
+                                    e."Latest_flag" as "Latest_flag_445", e."Rejection_Count" as "Rej445",
+                                    f."Latest_flag" as "Latest_flag_444", f."Rejection_Count" as "Rej444",
+                                    g."Latest_flag" as "Latest_flag_399", g."Rejection_Count" as "Rej399",
+                                    h."Latest_flag" as "Latest_flag_456", h."Rejection_Count" as "Rej456",
+                                    i."Latest_flag" as "Latest_flag_808", i."Rejection_Count" as "Rej808",
+                                    j."Latest_flag" as "Latest_flag_810", j."Rejection_Count" as "Rej810",
+                                    k."Latest_flag" as "Latest_flag_394", k."Rejection_Count" as "Rej394",
+                                    l."Latest_flag" as "Latest_flag_395", i."Rejection_Count" as "Rej395",
+                                    m."Latest_flag" as "Latest_flag_392", m."Rejection_Count" as "Rej392",
+                                    n."Latest_flag" as "Latest_flag_426", n."Rejection_Count" as "Rej426",
+                                    o."Latest_flag" as "Latest_flag_880", o."Rejection_Count" as "Rej880",
+                                     p."Latest_flag" as "Latest_flag_396", p."Rejection_Count" as "Rej396",
+                                      q."Latest_flag" as "Latest_flag_806", q."Rejection_Count" as "Rej806",
+                                      i."Latest_flag" as "Latest_flag_459", i."Rejection_Count" as "Rej459",
+                                       s."Latest_flag" as "Latest_flag_432", s."Rejection_Count" as "Rej432"
+                                      from 
+                                    (select distinct "Account_Id" from :LOG_RECOMMENDATION_COMBINED_ALL) a
+                                    LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '448') b
+                                    on a."Account_Id" = b."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '443') c
+                                    on a."Account_Id" = c."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '446') d
+                                    on a."Account_Id" = d."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '445') e
+                                    on a."Account_Id" = e."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '444') f
+                                    on a."Account_Id" = f."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '399') g
+                                    on a."Account_Id" = g."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '456') h
+                                    on a."Account_Id" = h."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '808') i
+                                    on a."Account_Id" = i."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '810') j
+                                    on a."Account_Id" = j."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '394') k
+                                    on a."Account_Id" = k."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = 395) l
+                                    on a."Account_Id" = l."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '392') m
+                                    on a."Account_Id" = m."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '426') n
+                                    on a."Account_Id" = n."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '880') o
+                                    on a."Account_Id" = o."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '396') p
+                                    on a."Account_Id" = p."Account_Id"
+                                      LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '806') q
+                                    on a."Account_Id" = q."Account_Id"  
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '459') r
+                                    on a."Account_Id" = r."Account_Id"
+                                     LEFT OUTER JOIN 
+                                    (select "Account_Id","Latest_flag","Rejection_Count" from :LOG_RECOMMENDATION_COMBINED_ALL where "Product_Id" = '432') s
+                                    on a."Account_Id" = s."Account_Id";
+
+select max("DateTime") into V_LR_MAX from "CARE"."PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_LOG_RECOMMENDATIONS";
+
+UPDATE "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MODEL_CONFIGURATION"
+SET "Config_Value_Timestamp" = :V_LR_MAX , "Last_Updated" = now() , "Updated_By" = 'SYSTEM'
+WHERE "Configuration_Name" = 'V_LR_MAX';
+
+/**********************************************************************************************
+LATE PAYMENT DETAILS
+**********************************************************************************************/
+
+V_LATE_PAYMENT =  SELECT 
+	                rc.CUSACC_IDN AS SRC_ACCT_ID
+                	, NULL AS SRC_ACCT_ID2
+                	, 'CBIS' AS SRC_SYS_CD
+                	, EXTRACT(MONTH FROM rc.CNCRCY_TMSTMP) AS BILL_MONTH
+                	, EXTRACT(YEAR FROM rc.CNCRCY_TMSTMP) AS BILL_YEAR
+                FROM  CBIS.RECEIVABLE_CHARGE rc 
+                WHERE 1 = 1
+                	AND rc.CHRG_CMPT_CODE = 'LPC'
+                	AND rc.CNCRCY_TMSTMP >= ADD_MONTHS(now(), -12)
+                
+                
+                UNION ALL 
+                
+                SELECT 
+                	cv.KY_CUST_NO AS SRC_ACCT_ID
+                	, NULL AS SRC_ACCT_ID2
+                	, 'CSS' AS SRC_SYS_CD
+                	, SUBSTR(da.DT_REV_MB_YYYYMM, 5, 2) AS BILL_MONTH	
+                	, SUBSTR(da.DT_REV_MB_YYYYMM, 0, 4) AS BILL_YEAR
+                FROM CSS.CU03TB01_CUSTOMER cv
+                INNER JOIN CSS.CU02TB01_BILL_ACCT ba ON cv.KY_CUST_NO = ba.KY_CUST_NO
+                INNER JOIN CSS.CU02TB04_DB_ACTVTY da ON ba.KY_BA = da.KY_BA
+                  AND  da.CD_BUS = '0600'
+                  AND  da.AT_REMN_DB > 0
+                  AND  da.CD_SHOWN_ON_BILL = 'S'
+                  AND da.DT_REV_MB_YYYYMM >= EXTRACT(YEAR FROM ADD_MONTHS(now(), -12)) || LPAD(EXTRACT(MONTH FROM ADD_MONTHS(now(), -12)), 2, 0) 
+                  
+                UNION ALL 
+                
+                SELECT 
+                   ACCT_ID AS SRC_ACCT_ID
+                   , NULL AS SRC_ACCT_ID2
+                   , 'CIM' AS SRC_SYS_CD 
+                   , SUBSTR(ARCH_MM_DT, 5, 2) AS BILL_MONTH
+                   , SUBSTR(ARCH_MM_DT, 0, 4) AS BILL_YEAR
+                FROM CIM.TMC05 
+                WHERE ACCT_PMT_INF_CD IN ('1', '2', '3', '4')
+                  AND ARCH_MM_DT >=  EXTRACT(YEAR FROM ADD_MONTHS(now(), -12)) || LPAD(EXTRACT(MONTH FROM ADD_MONTHS(now(), -12)), 2, 0) 
+                  
+                UNION ALL 
+                
+                SELECT 
+                	a.I_ACCT_CA AS SRC_ACCT_ID
+                	, a.I_TNT AS SRC_ACCT_ID2
+                	, 'CMS' AS SRC_SYS_CD
+                	, EXTRACT(MONTH FROM tb.D_RVNU_PER) AS BILL_MONTH
+                	, EXTRACT(YEAR FROM tb.D_RVNU_PER) AS BILL_YEAR
+                FROM CMS_EAST.TCSS_AUDIT a
+                INNER JOIN CMS_EAST.TCSS_BILL tb ON a.I_ACCT_CA = tb.I_ACCT_CA
+                	AND a.I_TNT = tb.I_TNT 
+                 	AND EXTRACT(MONTH FROM a.Z_TR_POST) = EXTRACT(MONTH FROM tb.D_CBP_DUE)
+                	AND EXTRACT(YEAR FROM a.Z_TR_POST) = EXTRACT(YEAR FROM tb.D_CBP_DUE)
+                    AND TRIM(a.C_TR) = 'LPC' and TRIM(C_TR_BILL_PRNT) = 'Y' 
+                	 AND tb.D_RVNU_PER >= ADD_MONTHS(now(), -12)
+                where TRIM(C_CAT_SCNDY) != 'LPCC';
+
+V_ACCOUNT_LATE_PAYMENT  =  select b."Account_Id",BILL_MONTH,BILL_YEAR from :V_LATE_PAYMENT a
+                            INNER JOIN
+                            "CUSTOMER_DW"."Customer_Account" b
+                            on concat(trim(b."Source_Account_Id"),trim(b."Source_Account_Id2")) = concat(trim(a.SRC_ACCT_ID),CASE WHEN trim(a.SRC_ACCT_ID2) is null THEN '' ELSE trim(a.SRC_ACCT_ID2) END)
+                            and trim(b."Source_System_Cd") = a."SRC_SYS_CD";                         
+
+V_LATE_PAY_PART_12 = 
+                            select "Account_Id", count(*) as "Late_Payment_12_444" , count(*) as "Late_Payment_12_445", count(*) as "Late_Payment_12_446", count(*) as "Late_Payment_12_808"
+                           from (select "Account_Id" from :V_ACCOUNT_LATE_PAYMENT where CAST(CONCAT('01.',CONCAT(CONCAT("BILL_MONTH",'.'),"BILL_YEAR")) as DATE) >= ADD_MONTHS(now(),-12))
+                           GROUP by "Account_Id";
+
+V_LATE_PAY_PART_3 = select "Account_Id", count(*) as "Late_Payment_3_444" , count(*) as "Late_Payment_3_445", count(*) as "Late_Payment_3_446", count(*) as "Late_Payment_3_808"
+                           from (select "Account_Id" from :V_ACCOUNT_LATE_PAYMENT where CAST(CONCAT('01.',CONCAT(CONCAT("BILL_MONTH",'.'),"BILL_YEAR")) as DATE) >= ADD_MONTHS(now(),-3))
+                           GROUP by "Account_Id";
+                           
+V_LATE_PAYMENT_FINAL_FEATURE = select  a."Account_Id", "Late_Payment_12_444", "Late_Payment_12_445", "Late_Payment_12_446", "Late_Payment_12_808" , 
+                                 "Late_Payment_3_444", "Late_Payment_3_445", "Late_Payment_3_446", "Late_Payment_3_808"
+                               from :V_LATE_PAY_PART_12 a
+                               LEFT OUTER JOIN 
+                               :V_LATE_PAY_PART_3 b
+                               on a."Account_Id" = b."Account_Id";
+                    
+/************************************************************************
+PARTICIPATION_FEATURES
+************************************************************************/
+
+
+V_PARTICIPATION =   select "ACCOUNT_ID","ID","PARTICIPATION_DATE" from (
+                                  select "ACCOUNT_ID", b."Group_Id" as "ID","PARTICIPATION_DATE",
+                                  row_number() over (partition by "ACCOUNT_ID","Group_Id" order by "ACCOUNT_ID","Group_Id","PARTICIPATION_DATE") as "ROW" from 
+                                   (select "ACCOUNT_ID","ID","PARTICIPATION_DATE" from (
+                     select "Account_Id" as "ACCOUNT_ID","Product_Id" AS "ID","Participation_Dt" as "PARTICIPATION_DATE" ,
+                         row_number() over (partition by "Account_Id" ,"Product_Id"
+                         order by "Account_Id" ,"Product_Id" ,"Participation_Dt"   DESC) as "rn" 
+                         from "HANA_EE"."PKG_COMMON_MODEL.PKG_TABLE_FUNCTION::ZGLOBTF_PARTICIPATION"())
+                         where "rn"='1') a
+                       INNER JOIN "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MAP_PRODUCT" b
+                       on b."Sub_Group_Id" = a."ID") where "ROW" = '1';
+                       
+V_PARTICIPATION_TRANSPOSE =     select "ACCOUNT_ID" as "Account_Id", 
+                                                sum(cast("PARTICIPATION_448" as INTEGER )) as "g448",
+                                                sum(cast("PARTICIPATION_445" as INTEGER )) as "g445",
+                                                sum(cast("PARTICIPATION_443" as INTEGER )) as "g443",
+                                                sum(cast("PARTICIPATION_446" as INTEGER )) as "g446",
+                                                sum(cast("PARTICIPATION_444" as INTEGER )) as "g444",
+                                                sum(cast("PARTICIPATION_399" as INTEGER )) as "g399",
+                                                sum(cast("PARTICIPATION_456" as INTEGER )) as "g456",
+                                                sum(cast("PARTICIPATION_808" as INTEGER )) as "g808",
+                                                sum(cast("PARTICIPATION_392" as INTEGER )) as "g392",
+                                                sum(cast("PARTICIPATION_395" as INTEGER )) as "g395",
+                                                sum(cast("PARTICIPATION_810" as INTEGER )) as "g810",
+                                                sum(cast("PARTICIPATION_394" as INTEGER )) as "g394",
+                                                sum(cast("PARTICIPATION_426" as INTEGER )) as "g426",
+                                                sum(cast("PARTICIPATION_880" as INTEGER )) as "g880",
+                                                sum(cast("PARTICIPATION_396" as INTEGER )) as "g396",
+                                                sum(cast("PARTICIPATION_806" as INTEGER )) as "g806",
+                                                sum(cast("PARTICIPATION_459" as INTEGER )) as "g459",
+                                                sum(cast("PARTICIPATION_432" as INTEGER )) as "g432"
+                                                from (
+                                                select "ACCOUNT_ID",
+                                                CASE WHEN "ID" = '448' THEN '1' ELSE '0' END as "PARTICIPATION_448",
+                                                CASE WHEN "ID" = '445' THEN '1' ELSE '0' END as "PARTICIPATION_445",
+                                                CASE WHEN "ID" = '443' THEN '1' ELSE '0' END as "PARTICIPATION_443",
+                                                CASE WHEN "ID" = '446' THEN '1' ELSE '0' END as "PARTICIPATION_446",
+                                                CASE WHEN "ID" = '444' THEN '1' ELSE '0' END as "PARTICIPATION_444",
+                                                CASE WHEN "ID" = '399' THEN '1' ELSE '0' END as "PARTICIPATION_399",
+                                                CASE WHEN "ID" = '456' THEN '1' ELSE '0' END as "PARTICIPATION_456",
+                                                CASE WHEN "ID" = '808' THEN '1' ELSE '0' END as "PARTICIPATION_808",
+                                                CASE WHEN "ID" = '392' THEN '1' ELSE '0' END as "PARTICIPATION_392",
+                                                CASE WHEN "ID" = '395' THEN '1' ELSE '0' END as "PARTICIPATION_395",
+                                                CASE WHEN "ID" = '810' THEN '1' ELSE '0' END as "PARTICIPATION_810",
+                                                CASE WHEN "ID" = '394' THEN '1' ELSE '0' END as "PARTICIPATION_394",
+                                                CASE WHEN "ID" = '426' THEN '1' ELSE '0' END as "PARTICIPATION_426",
+                                                CASE WHEN "ID" = '880' THEN '1' ELSE '0' END as "PARTICIPATION_880",
+                                                CASE WHEN "ID" = '396' THEN '1' ELSE '0' END as "PARTICIPATION_396",
+                                                CASE WHEN "ID" = '806' THEN '1' ELSE '0' END as "PARTICIPATION_806",
+                                                CASE WHEN "ID" = '459' THEN '1' ELSE '0' END as "PARTICIPATION_459",
+                                                CASE WHEN "ID" = '432' THEN '1' ELSE '0' END as "PARTICIPATION_432"
+                                                from :V_PARTICIPATION) GROUP BY "ACCOUNT_ID";
+
+/****************************************************************************
+Selecting and Creating Features from Acxiom and Resisdential_Stat_Account having common Account_Id
+*****************************************************************************/      
+
+V_ACXIOM_ACCOUNT_JN = select a."Account_Id","Premise_Zip","Premise_State","Premise_City",
+                                                                     "Home_Property_Type",
+                                         CASE WHEN TRIM("Adult_Age")='' THEN null ELSE TRIM("Adult_Age") end as "Adult_Age"
+                                         ,"Owner_Renter",a."Household_Size",
+                                         CASE WHEN TRIM(a."Length_of_Residence")='' THEN null ELSE TRIM(a."Length_of_Residence") end as "Length_of_Residence",
+                                         CASE WHEN TRIM("Home_Square_Footage")='' THEN null ELSE TRIM(LTRIM("Home_Square_Footage",'0')) end as "Home_Square_Footage",
+                                         CASE WHEN TRIM("Lot_Square_Footage")='' THEN null ELSE TRIM(LTRIM("Lot_Square_Footage",'0')) end as "Lot_Square_Footage",
+                                         CASE WHEN a."Dwelling_Type" is null or TRIM(a."Dwelling_Type") = '' THEN 'Unknown'
+                                         ELSE a."Dwelling_Type" end as "Dwelling_Type",
+                                         CASE WHEN "Buying_Channel_Preferences_Propensity_Internet" is null or TRIM("Buying_Channel_Preferences_Propensity_Internet") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Buying_Channel_Preferences_Propensity_Internet" as INTEGER) END as "Buying_Channel_Preferences_Propensity_Internet_9999", 
+                                        
+                                         CASE WHEN "Buying_Channel_Preferences_Propensity_Mail" is null or TRIM("Buying_Channel_Preferences_Propensity_Mail") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Buying_Channel_Preferences_Propensity_Mail" as INTEGER)  END as "Buying_Channel_Preferences_Propensity_Mail_9999",
+                                         CASE WHEN "Buying_Channel_Preferences_Propensity_Phone" is null or TRIM("Buying_Channel_Preferences_Propensity_Phone") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Buying_Channel_Preferences_Propensity_Phone" as INTEGER)  END as "Buying_Channel_Preferences_Propensity_Phone_9999",
+
+                                         CASE WHEN "Media_Channel_Usage_Internet" is null or TRIM("Media_Channel_Usage_Internet") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Media_Channel_Usage_Internet" as INTEGER)  END as "Media_Channel_Usage_Internet_9999",
+                                         
+
+                                         CASE WHEN "Media_Channel_Usage_Cell_Phone" is null or TRIM("Media_Channel_Usage_Cell_Phone") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Media_Channel_Usage_Cell_Phone" as INTEGER)  END as "Media_Channel_Usage_Cell_Phone_9999",
+
+                                         CASE WHEN "Media_Channel_Usage_Primetime_TV" is null or TRIM("Media_Channel_Usage_Primetime_TV") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Media_Channel_Usage_Primetime_TV" as INTEGER)  END as "Media_Channel_Usage_Primetime_TV_9999",
+
+                                         CASE WHEN "Media_Channel_Usage_Daytime_TV" is null or TRIM("Media_Channel_Usage_Daytime_TV") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Media_Channel_Usage_Daytime_TV" as INTEGER)  END as "Media_Channel_Usage_Daytime_TV_9999",
+
+                                         CASE WHEN "Media_Channel_Usage_Outdoor" is null or TRIM("Media_Channel_Usage_Outdoor") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Media_Channel_Usage_Outdoor" as INTEGER)  END as "Media_Channel_Usage_Outdoor_9999",
+
+                                         CASE WHEN "Media_Channel_Usage_Radio" is null or TRIM("Media_Channel_Usage_Radio") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Media_Channel_Usage_Radio" as INTEGER)  END as "Media_Channel_Usage_Radio_9999",
+                                         CASE WHEN "Media_Channel_Usage_Magazine" is null or TRIM("Media_Channel_Usage_Magazine") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Media_Channel_Usage_Magazine" as INTEGER)  END as "Media_Channel_Usage_Magazine_9999",
+
+                                         CASE WHEN "Media_Channel_Usage_Newspaper" is null or TRIM("Media_Channel_Usage_Newspaper") = ''
+                                         THEN '9999'
+                                         ELSE CAST("Media_Channel_Usage_Newspaper" as INTEGER) END as "Media_Channel_Usage_Newspaper_9999",
+                                         
+                                         CASE WHEN "Media_Channel_Usage_Primetime_TV" is null or TRIM("Media_Channel_Usage_Primetime_TV") = ''
+                                                                     THEN (select avg(CAST("Media_Channel_Usage_Primetime_TV" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Media_Channel_Usage_Primetime_TV" is not null and TRIM("Media_Channel_Usage_Primetime_TV") != ''
+                                                                     )
+                                                                     ELSE "Media_Channel_Usage_Primetime_TV" END as "Mean_Media_Channel_Usage_Primetime_TV",
+                                                                                   CASE WHEN "Buying_Channel_Preferences_Propensity_Internet" is null or TRIM("Buying_Channel_Preferences_Propensity_Internet") = ''
+                                                                     THEN (select avg(CAST("Buying_Channel_Preferences_Propensity_Internet" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Buying_Channel_Preferences_Propensity_Internet" is not null and TRIM("Buying_Channel_Preferences_Propensity_Internet") != ''
+                                                                     )
+                                                                     ELSE "Buying_Channel_Preferences_Propensity_Internet" END as "Mean_Buying_Channel_Preferences_Propensity_Internet",
+                                                                     CASE WHEN "Media_Channel_Usage_Internet" is null or TRIM("Media_Channel_Usage_Internet") = ''
+                                                                     THEN (select avg(CAST("Media_Channel_Usage_Internet" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Media_Channel_Usage_Internet" is not null and TRIM("Media_Channel_Usage_Internet") != ''
+                                                                     )
+                                                                     ELSE "Media_Channel_Usage_Internet" END as "Mean_Media_Channel_Usage_Internet",
+                                                                     CASE WHEN "Buying_Channel_Preferences_Propensity_Phone" is null or TRIM("Buying_Channel_Preferences_Propensity_Phone") = ''
+                                                                     THEN (select avg(CAST("Buying_Channel_Preferences_Propensity_Phone" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Buying_Channel_Preferences_Propensity_Phone" is not null and TRIM("Buying_Channel_Preferences_Propensity_Phone") != ''
+                                                                     )
+                                                                     ELSE "Buying_Channel_Preferences_Propensity_Phone" END as "Mean_Buying_Channel_Preferences_Propensity_Phone",
+                                                                     CASE WHEN "Media_Channel_Usage_Daytime_TV" is null or TRIM("Media_Channel_Usage_Daytime_TV") = ''
+                                                                     THEN (select avg(CAST("Media_Channel_Usage_Daytime_TV" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Media_Channel_Usage_Daytime_TV" is not null and TRIM("Media_Channel_Usage_Daytime_TV") != ''
+                                                                     )
+                                                                     ELSE "Media_Channel_Usage_Daytime_TV" END as "Mean_Media_Channel_Usage_Daytime_TV",
+                                                                     CASE WHEN "Media_Channel_Usage_Cell_Phone" is null or TRIM("Media_Channel_Usage_Cell_Phone") = ''
+                                                                     THEN (select avg(CAST("Media_Channel_Usage_Cell_Phone" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Media_Channel_Usage_Cell_Phone" is not null and TRIM("Media_Channel_Usage_Cell_Phone") != ''
+                                                                     )
+                                                                     ELSE "Media_Channel_Usage_Cell_Phone" END as "Mean_Media_Channel_Usage_Cell_Phone",
+                                                                     CASE WHEN "Buying_Channel_Preferences_Propensity_Mail" is null or TRIM("Buying_Channel_Preferences_Propensity_Mail") = ''
+                                                                           THEN (select avg(CAST("Buying_Channel_Preferences_Propensity_Mail" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                           where "Buying_Channel_Preferences_Propensity_Mail" is not null and TRIM("Buying_Channel_Preferences_Propensity_Mail") != ''
+                                                                           )
+                                                                           ELSE "Buying_Channel_Preferences_Propensity_Mail" END as "Mean_Buying_Channel_Preferences_Propensity_Mail",
+                                                                           CASE WHEN "Media_Channel_Usage_Magazine" is null or TRIM("Media_Channel_Usage_Magazine") = ''
+                                                                     THEN (select Avg(CAST("Media_Channel_Usage_Magazine" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Media_Channel_Usage_Magazine" is not null and TRIM("Media_Channel_Usage_Magazine") != ''
+                                                                     )
+                                                                     ELSE "Media_Channel_Usage_Magazine" END as "Mean_Media_Channel_Usage_Magazine",
+                                                                     CASE WHEN "Media_Channel_Usage_Newspaper" is null or TRIM("Media_Channel_Usage_Newspaper") = ''
+                                                                     THEN (select AVG(CAST("Media_Channel_Usage_Newspaper" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Media_Channel_Usage_Newspaper" is not null and TRIM("Media_Channel_Usage_Newspaper") != ''
+                                                                     )
+                                                                     ELSE "Media_Channel_Usage_Newspaper" END as "Mean_Media_Channel_Usage_Newspaper",
+                                                                     CASE WHEN "Media_Channel_Usage_Outdoor" is null or TRIM("Media_Channel_Usage_Outdoor") = ''
+                                                                     THEN (select avg(CAST("Media_Channel_Usage_Outdoor" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Media_Channel_Usage_Outdoor" is not null and TRIM("Media_Channel_Usage_Outdoor") != ''
+                                                                     )
+                                                                     ELSE "Media_Channel_Usage_Outdoor" END as "Mean_Media_Channel_Usage_Outdoor",
+                                                                    CASE WHEN "Media_Channel_Usage_Radio" is null or TRIM("Media_Channel_Usage_Radio") = ''
+                                                                     THEN (select Avg(CAST("Media_Channel_Usage_Radio" as DOUBLE)) from "ANALYTICS_DW"."Acxiom"
+                                                                     where "Media_Channel_Usage_Radio" is not null and TRIM("Media_Channel_Usage_Radio") != ''
+                                                                     )
+                                                                     ELSE "Media_Channel_Usage_Radio" END as "Mean_Media_Channel_Usage_Radio",
+                                         "Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+                                         "Energy_Consumer_Dynamics_Affordability_Level_Score",
+                                         "Energy_Consumer_Dynamics_Green_Affinity_Score",
+                                        "Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+                                        "Energy_Consumer_Dynamics_Investment_Capacity_Score",
+                                        "Energy_Consumer_Dynamics_Technology_Propensity_Score",                                     
+                                          b."Jurisdiction",b."Heat_Source",
+                                         b."Smart_Meter",b."Account_Active_Dt",
+                                         --New 432
+                                         b."kWh_Revenue",
+                                         b."kWhs",
+                                         --new
+                                         a."Household_Size"
+                                         "OLS_Email_Indicator","Population_Density",
+                                                                     CASE WHEN "Lot_Square_Footage_Range" is null OR TRIM("Lot_Square_Footage_Range") = '' THEN 'Unknown'
+                                                                    ELSE "Lot_Square_Footage_Range" end as "Lot_Square_Footage_Range" ,
+                                         "Adult_Number_in_Household","Year_Built","AMI_Meter",
+                                                                    '1' as "dummy" from "ANALYTICS_DW"."Acxiom" a
+                                         INNER JOIN 
+                                         "ANALYTICS_DW"."Residential_Stats_Account" b
+                                         ON a."Account_Id" = b."Account_Id"
+                                         WHERE "Account_Active_Dt" is not null;
+                                        
+/***************************************************************************************************************
+CUSTOMER DETAILS
+***************************************************************************************************************/
+
+V_CUSTOMER_ACC_DETAIL = 
+                    select "Account_Id","Account_Number",a."Source_System_Cd","Owner_Renter_DW","Premise_Jurisdiction_Cd" as "Jurisdiction_Name",
+                    TRIM("Source_Account_Id") as "Source_Account_Id1","Account_Status_Cd"
+                    ,CASE WHEN TRIM("Source_Account_Id2") = '' THEN null 
+                    ELSE LPAD(TRIM("Source_Account_Id2"),2,0) END as "Source_Account_Id2_String",
+                    CAST(CASE WHEN TRIM("Source_Account_Id2") = '' THEN null 
+                    ELSE LPAD(TRIM("Source_Account_Id2"),2,0) END  as INTEGER) as "Source_Account_Id2_Int"
+                    from
+                    (
+                        select "Account_Id",concat(rtrim("Source_Account_Id"), CASE WHEN rtrim("Source_Account_Id2") = '' THEN '' ELSE LPAD(rtrim("Source_Account_Id2"),2,0) END) as "Account_Number",
+                      trim("Source_System_Cd") as "Source_System_Cd","Source_Account_Id","Source_Account_Id2","Account_Status_Cd",
+                      CASE WHEN "Account_Property_Owner_Cd" IN (select "Config_Value_String" from "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MODEL_CONFIGURATION"
+                      where "Configuration_Name"='OWNER_FLAG') THEN 'O'
+                      WHEN "Account_Property_Owner_Cd" IN (select "Config_Value_String" from "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MODEL_CONFIGURATION"
+                      where "Configuration_Name"='RENTER_FLAG') THEN 'R' END as "Owner_Renter_DW", "Premise_Id" from "CUSTOMER_DW"."Customer_Account") a
+                      INNER JOIN 
+                      "CUSTOMER_DW"."Premise" b on a."Premise_Id" = b."Premise_Id";
+                      
+V_CONDITION = select "Account_Id","Account_Condition_Nm" from (
+            select "Account_Id",TRIM("Account_Condition_Nm") as "Account_Condition_Nm",row_number() over (Partition by "Account_Id" order by  "Account_Condition_Load_Ts" DESC) as "RN"
+            from "CUSTOMER_DW"."Account_Condition" where TRIM("Account_Condition_Nm") IN ('NON-RESIDENTIAL','RESIDENTIAL')) where "RN" = '1';
+            
+V_CUSTOMER_DETAILS = select a."Account_Id","Account_Number",a."Source_System_Cd","Owner_Renter_DW","Jurisdiction_Name",
+                     "Source_Account_Id1","Account_Status_Cd",
+                    "Source_Account_Id2_String",
+                     "Source_Account_Id2_Int","Account_Condition_Nm" from :V_CUSTOMER_ACC_DETAIL a
+                     LEFT OUTER JOIN :V_CONDITION b on a."Account_Id" = b."Account_Id";
+
+
+V_JN_TRANSFORM =                                                select a."Account_Id",
+                                                                ac."Account_Number",
+                                                                ac."Source_System_Cd",
+                                                                ac."Jurisdiction_Name",
+                                                                CASE WHEN ac."Owner_Renter_DW" is null THEN a."Owner_Renter" ELSE ac."Owner_Renter_DW" END as "Owner_Renter_DW",
+                                                                CAST("Adult_Age" as DOUBLE) as "Adult_Age",
+                                                                CAST("Length_of_Residence" as DOUBLE) as "Length_of_Residence",
+                                                                CAST(a."Dwelling_Type" as NVARCHAR(10)) as "Dwelling_Type",
+                                                                CAST("Buying_Channel_Preferences_Propensity_Internet_9999" as DOUBLE) as "Buying_Channel_Preferences_Propensity_Internet_9999",
+                                                                CAST("Buying_Channel_Preferences_Propensity_Mail_9999" as DOUBLE) as "Buying_Channel_Preferences_Propensity_Mail_9999",
+                                                                CAST("Buying_Channel_Preferences_Propensity_Phone_9999" as DOUBLE) as "Buying_Channel_Preferences_Propensity_Phone_9999",
+                                                                CAST("Mean_Buying_Channel_Preferences_Propensity_Phone" as DOUBLE) as "Mean_Buying_Channel_Preferences_Propensity_Phone",
+                                                                CAST("Mean_Buying_Channel_Preferences_Propensity_Mail" as DOUBLE) as "Mean_Buying_Channel_Preferences_Propensity_Mail",
+                                                                CAST("Media_Channel_Usage_Internet_9999" as DOUBLE) as "Media_Channel_Usage_Internet_9999"
+                                                                ,CAST("Media_Channel_Usage_Cell_Phone_9999" as DOUBLE) as "Media_Channel_Usage_Cell_Phone_9999",
+                                                                 CAST("Media_Channel_Usage_Primetime_TV_9999" as DOUBLE) as "Media_Channel_Usage_Primetime_TV_9999",
+                                                                 CAST("Media_Channel_Usage_Daytime_TV_9999" as DOUBLE) as "Media_Channel_Usage_Daytime_TV_9999"
+                                                                ,CAST("Media_Channel_Usage_Outdoor_9999" as DOUBLE) as "Media_Channel_Usage_Outdoor_9999",
+                                                                 CAST("Mean_Media_Channel_Usage_Primetime_TV" as DOUBLE) as "Mean_Media_Channel_Usage_Primetime_TV",
+                                                                CAST("Media_Channel_Usage_Radio_9999" as DOUBLE) as "Media_Channel_Usage_Radio_9999",
+                                                                CAST("Media_Channel_Usage_Magazine_9999" as DOUBLE) as "Media_Channel_Usage_Magazine_9999",
+                                                                CAST("Media_Channel_Usage_Newspaper_9999" as DOUBLE) as "Media_Channel_Usage_Newspaper_9999",
+                                                                CAST("Mean_Media_Channel_Usage_Internet" as DOUBLE) as "Mean_Media_Channel_Usage_Internet",
+                                                                CAST("Mean_Media_Channel_Usage_Daytime_TV" as DOUBLE) as "Mean_Media_Channel_Usage_Daytime_TV",
+                                                                CAST("Mean_Media_Channel_Usage_Cell_Phone" as DOUBLE) as "Mean_Media_Channel_Usage_Cell_Phone",
+                                                                CAST("Mean_Media_Channel_Usage_Magazine" as DOUBLE) as "Mean_Media_Channel_Usage_Magazine",
+                                                                CAST("Mean_Media_Channel_Usage_Newspaper" as DOUBLE) as "Mean_Media_Channel_Usage_Newspaper",
+                                                                CAST("Mean_Media_Channel_Usage_Outdoor" as DOUBLE) as "Mean_Media_Channel_Usage_Outdoor",
+                                                                CAST("Mean_Media_Channel_Usage_Radio" as DOUBLE) as "Mean_Media_Channel_Usage_Radio",
+                                                                CAST("Energy_Consumer_Dynamics_Comfort_Consumption_Score" as DOUBLE) as "Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+                                                                CAST("Mean_Buying_Channel_Preferences_Propensity_Internet" as DOUBLE) as "Mean_Buying_Channel_Preferences_Propensity_Internet",
+                                                                CAST("Energy_Consumer_Dynamics_Affordability_Level_Score" as DOUBLE) as "Energy_Consumer_Dynamics_Affordability_Level_Score" ,
+                                                                CAST("Energy_Consumer_Dynamics_Green_Affinity_Score" as DOUBLE) as "Energy_Consumer_Dynamics_Green_Affinity_Score",
+                                                                CAST("Energy_Consumer_Dynamics_Info_Action_Orientation_Score" as DOUBLE) as "Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+                                                                CAST("Energy_Consumer_Dynamics_Investment_Capacity_Score" as DOUBLE) as "Energy_Consumer_Dynamics_Investment_Capacity_Score",
+                                                                CAST("Energy_Consumer_Dynamics_Technology_Propensity_Score" as DOUBLE) as "Energy_Consumer_Dynamics_Technology_Propensity_Score",                
+                                                                CAST(a."Jurisdiction" as  NVARCHAR(20)) as "Jurisdiction"
+                                                                ,CAST("Heat_Source" as NVARCHAR(20)) as "Heat_Source"
+                                                                , CAST("Smart_Meter" as NVARCHAR(20)) as "Smart_Meter"
+                                                                ,CASE WHEN (a."Home_Square_Footage" is null OR TRIM(a."Home_Square_Footage")='' or CAST("Home_Square_Footage" as DOUBLE)>'20000' 
+                                                                or CAST("Home_Square_Footage" as DOUBLE) < '300') AND f."imputed_home_square_footage" is null AND g."imputed_home_square_footage" is null
+                                                                AND k."imputed_StateCity_home_square_footage" is null THEN l."imputed_Overall_home_square_footage"
+                                                                WHEN (a."Home_Square_Footage" is null OR TRIM(a."Home_Square_Footage")='' or CAST("Home_Square_Footage" as DOUBLE)>'20000' 
+                                                                or CAST("Home_Square_Footage" as DOUBLE) < '300') AND f."imputed_home_square_footage" is null AND g."imputed_home_square_footage" is null
+                                                                THEN k."imputed_StateCity_home_square_footage"
+                                                                WHEN (a."Home_Square_Footage" is null OR TRIM(a."Home_Square_Footage")='' or CAST("Home_Square_Footage" as DOUBLE)>'20000' 
+                                                                or CAST("Home_Square_Footage" as DOUBLE) < '300') AND f."imputed_home_square_footage" is null THEN g."imputed_home_square_footage"
+                                                                WHEN 
+                                                                (a."Home_Square_Footage" is null OR TRIM(a."Home_Square_Footage")='' or CAST("Home_Square_Footage" as DOUBLE)>'20000' 
+                                                                or CAST("Home_Square_Footage" as DOUBLE) < '300') THEN f."imputed_home_square_footage"
+                                                                ELSE TRIM(a."Home_Square_Footage") end as "Home_Square_Footage",
+                                                                
+                                                                CASE WHEN (a."Lot_Square_Footage" is null OR TRIM(a."Lot_Square_Footage")='' or CAST("Lot_Square_Footage" as DOUBLE)>'20000' 
+                                                                or CAST("Lot_Square_Footage" as DOUBLE) < '300') AND yf."imputed_Lot_square_footage" is null AND yg."imputed_Lot_square_footage" is null
+                                                                AND yk."imputed_StateCity_Lot_square_footage" is null THEN yl."imputed_Overall_Lot_square_footage"
+                                                                WHEN (a."Lot_Square_Footage" is null OR TRIM(a."Lot_Square_Footage")='' or CAST(a."Lot_Square_Footage" as DOUBLE)>'20000' 
+                                                                or CAST(a."Lot_Square_Footage" as DOUBLE) < '300') AND yf."imputed_Lot_square_footage" is null AND yg."imputed_Lot_square_footage" is null
+                                                                THEN yk."imputed_StateCity_Lot_square_footage"
+                                                                WHEN (a."Lot_Square_Footage" is null OR TRIM(a."Lot_Square_Footage")='' or CAST("Lot_Square_Footage" as DOUBLE)>'20000' 
+                                                                or CAST("Lot_Square_Footage" as DOUBLE) < '300') AND yf."imputed_Lot_square_footage" is null THEN yg."imputed_Lot_square_footage"
+                                                                WHEN 
+                                                                (a."Lot_Square_Footage" is null OR TRIM(a."Lot_Square_Footage")='' or CAST("Lot_Square_Footage" as DOUBLE)>'20000' 
+                                                                or CAST("Lot_Square_Footage" as DOUBLE) < '300') THEN yf."imputed_Lot_square_footage"
+                                                                ELSE TRIM(a."Lot_Square_Footage") end as "Lot_Square_Footage",
+                                                                CAST(a."Household_Size" as DOUBLE) as "Household_Size",
+                                                                                  CAST(a."OLS_Email_Indicator" as DOUBLE) as "OLS_Email_Indicator",
+                                                                                  CAST(a."Population_Density" as NVARCHAR(2)) as "Population_Density",
+                                                                                   CAST((CASE WHEN "kWh_Revenue" is null THEN '0' else "kWh_Revenue" end) as DOUBLE) as "kWh_Revenue" ,
+                                                                                                                    CAST((CASE WHEN "kWhs" is null THEN '0' else "kWhs" end)as DOUBLE)  as "kWhs",
+                                                                                                              CAST(a."Lot_Square_Footage_Range" as NVARCHAR(10)) as "Lot_Square_Footage_Range", 
+                                                                                                               CAST(a."Adult_Number_in_Household" as DOUBLE) as "Adult_Number_in_Household",
+                                                                                                              CAST(a."Owner_Renter" as NVARCHAR(10)) as "Owner_Renter",
+                                                                                                              CASE WHEN a."Home_Property_Type" is null or TRIM(a."Home_Property_Type") = '' THEN 'Unknown'
+                                                                                                                     ELSE "Home_Property_Type" end as "Home_Property_Type",
+                                                                                                                     CAST("Year_Built" as NVARCHAR(50)) as "Year_Built",  CAST("AMI_Meter" as NVARCHAR(1)) as "AMI_Meter",
+                                                                                                                     CASE WHEN wd."g448" is null THEN '0' ELSE wd."g448" end as "g448",
+                                                                                                                                                                                  CASE WHEN wd."g445" is null THEN '0' ELSE wd."g445" end as "g445",
+                                                                                                                                                                                    CASE WHEN wd."g443" is null THEN '0' ELSE wd."g443" end as "g443",
+                                                                                                                                                                                    CASE WHEN wd."g446" is null THEN '0' ELSE wd."g446" end as "g446",
+                                                                                                                                                                                    CASE WHEN wd."g444" is null THEN '0' ELSE wd."g444" end as "g444",
+                                                                                                                                                                                    CASE WHEN wd."g399" is null THEN '0' ELSE wd."g399" end as "g399",
+                                                                                                                                                                                    CASE WHEN wd."g456" is null THEN '0' ELSE wd."g456" end as "g456",
+                                                                                                                                                                                    CASE WHEN wd."g808" is null THEN '0' ELSE wd."g808" end as "g808",
+                                                                                                                                                                                    CASE WHEN wd."g392" is null THEN '0' ELSE wd."g392" end as "g392",
+                                                                                                                                                                                    CASE WHEN wd."g395" is null THEN '0' ELSE wd."g395" end as "g395",
+                                                                                                                                                                                    CASE WHEN wd."g810" is null THEN '0' ELSE wd."g810" end as "g810",
+                                                                                                                                                                                    CASE WHEN wd."g394" is null THEN '0' ELSE wd."g394" end as "g394",
+                                                                                                                                                                                    CASE WHEN wd."g426" is null THEN '0' ELSE wd."g426" end as "g426",
+                                                                                                                                                                                    CASE WHEN wd."g880" is null THEN '0' ELSE wd."g880" end as "g880",
+                                                                                                                                                                                    CASE WHEN wd."g396" is null THEN '0' ELSE wd."g396" end as "g396",
+                                                                                                                                                                                    CASE WHEN wd."g806" is null THEN '0' ELSE wd."g806" end as "g806",
+                                                                                                                                                                                    CASE WHEN wd."g459" is null THEN '0' ELSE wd."g459" end as "g459",
+                                                                                                                                                                                    CASE WHEN wd."g432" is null THEN '0' ELSE wd."g432" end as "g432",
+                                                                                                                                                                                   
+                                                                                                                                                                                    CASE WHEN we."Rej448" is null THEN '0' ELSE we."Rej448" end as "Rej448",
+                                                                                                                                                                                    CASE WHEN we."Rej445" is null THEN '0' ELSE we."Rej445" end as "Rej445",
+                                                                                                                                                                                    CASE WHEN we."Rej443" is null THEN '0' ELSE we."Rej443" end as "Rej443",
+                                                                                                                                                                                    CASE WHEN we."Rej446" is null THEN '0' ELSE we."Rej446" end as "Rej446",
+                                                                                                                                                                                    CASE WHEN we."Rej444" is null THEN '0' ELSE we."Rej444" end as "Rej444",
+                                                                                                                                                                                    CASE WHEN we."Rej399" is null THEN '0' ELSE we."Rej399" end as "Rej399",
+                                                                                                                                                                                    CASE WHEN we."Rej456" is null THEN '0' ELSE we."Rej456" end as "Rej456",
+                                                                                                                                                                                    CASE WHEN we."Rej808" is null THEN '0' ELSE we."Rej808" end as "Rej808",
+                                                                                                                                                                                    CASE WHEN we."Rej392" is null THEN '0' ELSE we."Rej392" end as "Rej392",
+                                                                                                                                                                                    CASE WHEN we."Rej395" is null THEN '0' ELSE we."Rej395" end as "Rej395",
+                                                                                                                                                                                    CASE WHEN we."Rej810" is null THEN '0' ELSE we."Rej810" end as "Rej810",
+                                                                                                                                                                                    CASE WHEN we."Rej394" is null THEN '0' ELSE we."Rej394" end as "Rej394",
+                                                                                                                                                                                    CASE WHEN we."Rej426" is null THEN '0' ELSE we."Rej426" end as "Rej426",
+                                                                                                                                                                                    CASE WHEN we."Rej880" is null THEN '0' ELSE we."Rej880" end as "Rej880",
+                                                                                                                                                                                    CASE WHEN we."Rej396" is null THEN '0' ELSE we."Rej396" end as "Rej396",
+                                                                                                                                                                                    CASE WHEN we."Rej806" is null THEN '0' ELSE we."Rej806" end as "Rej806",
+                                                                                                                                                                                    CASE WHEN we."Rej459" is null THEN '0' ELSE we."Rej459" end as "Rej459",
+                                                                                                                                                                                    CASE WHEN we."Rej432" is null THEN '0' ELSE we."Rej432" end as "Rej432",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_448"   is null THEN 'Z'  else we."Latest_flag_448" end as "Latest_flag_448",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_445"   is null THEN 'Z'  else  we."Latest_flag_445" end as "Latest_flag_445",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_443"  is null THEN 'Z'  else  we."Latest_flag_443" end as "Latest_flag_443",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_446"  is null THEN 'Z'  else  we."Latest_flag_446" end as "Latest_flag_446",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_444"  is null  THEN 'Z'  else  we."Latest_flag_444" end as "Latest_flag_444",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_399"  is null THEN 'Z'  else  we."Latest_flag_399" end as "Latest_flag_399",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_456"  is null THEN 'Z'  else  we."Latest_flag_456" end as "Latest_flag_456",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_808"  is null THEN 'Z'  else  we."Latest_flag_808" end as "Latest_flag_808",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_392"  is null THEN 'Z'  else  we."Latest_flag_392" end as "Latest_flag_392",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_395"  is null THEN 'Z'  else  we."Latest_flag_395" end as "Latest_flag_395",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_810"  is null THEN 'Z'  else  we."Latest_flag_810" end as "Latest_flag_810",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_394"  is null THEN 'Z'  else  we."Latest_flag_394" end as "Latest_flag_394",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_426"  is null THEN 'Z'  else  we."Latest_flag_426" end as "Latest_flag_426",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_880"  is null THEN 'Z'  else  we."Latest_flag_880" end as "Latest_flag_880",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_396"  is null THEN 'Z'  else  we."Latest_flag_396" end as "Latest_flag_396",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_806"  is null THEN 'Z'  else  we."Latest_flag_806" end as "Latest_flag_806",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_459" is null  THEN  'Z'  else  we."Latest_flag_459" end as "Latest_flag_459",
+                                                                                                                                                                                    CASE WHEN we."Latest_flag_432" is null  THEN  'Z'  else  we."Latest_flag_432" end as "Latest_flag_432",
+                                                                                                                                                                                
+                                                                                                                                                                                     CASE WHEN  wb."Charges_3months_396" is null then '0' else  wb."Charges_3months_396" end as  "Charges_3months_396",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_396" is null then '0' else  wb."Charges_6months_396" end as  "Charges_6months_396",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_396" is null then '0' else  wb."Charges_9months_396" end as  "Charges_9months_396",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_396" is null then '0' else  wb."Charges_12months_396" end as  "Charges_12months_396",
+                                                                                                                                                                                    
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_448" is null then '0' else  wb."Charges_3months_448" end as  "Charges_3months_448",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_448" is null then '0' else  wb."Charges_6months_448" end as  "Charges_6months_448",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_448" is null then '0' else  wb."Charges_9months_448" end as  "Charges_9months_448",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_448" is null then '0' else  wb."Charges_12months_448" end as  "Charges_12months_448",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_445" is null then '0' else  wb."Charges_3months_445" end as  "Charges_3months_445",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_445" is null then '0' else  wb."Charges_6months_445" end as  "Charges_6months_445",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_445" is null then '0' else  wb."Charges_9months_445" end as  "Charges_9months_445",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_445" is null then '0' else  wb."Charges_12months_445" end as  "Charges_12months_445",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_443" is null then '0' else  wb."Charges_3months_443" end as  "Charges_3months_443",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_443" is null then '0' else  wb."Charges_6months_443" end as  "Charges_6months_443",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_443" is null then '0' else  wb."Charges_9months_443" end as  "Charges_9months_443",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_443" is null then '0' else  wb."Charges_12months_443" end as  "Charges_12months_443",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_446" is null then '0' else  wb."Charges_3months_446" end as  "Charges_3months_446",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_446" is null then '0' else  wb."Charges_6months_446" end as  "Charges_6months_446",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_446" is null then '0' else  wb."Charges_9months_446" end as  "Charges_9months_446",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_446" is null then '0' else  wb."Charges_12months_446" end as  "Charges_12months_446",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_444" is null then '0' else  wb."Charges_3months_444" end as  "Charges_3months_444",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_444" is null then '0' else  wb."Charges_6months_444" end as  "Charges_6months_444",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_444" is null then '0' else  wb."Charges_9months_444" end as  "Charges_9months_444",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_444" is null then '0' else  wb."Charges_12months_444" end as  "Charges_12months_444",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_399" is null then '0' else  wb."Charges_3months_399" end as  "Charges_3months_399",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_399" is null then '0' else  wb."Charges_6months_399" end as  "Charges_6months_399",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_399" is null then '0' else  wb."Charges_9months_399" end as  "Charges_9months_399",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_399" is null then '0' else  wb."Charges_12months_399" end as  "Charges_12months_399",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_456" is null then '0' else  wb."Charges_3months_456" end as  "Charges_3months_456",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_456" is null then '0' else  wb."Charges_6months_456" end as  "Charges_6months_456",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_456" is null then '0' else  wb."Charges_9months_456" end as  "Charges_9months_456",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_456" is null then '0' else  wb."Charges_12months_456" end as  "Charges_12months_456",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_808" is null then '0' else  wb."Charges_3months_808" end as  "Charges_3months_808",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_808" is null then '0' else  wb."Charges_6months_808" end as  "Charges_6months_808",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_808" is null then '0' else  wb."Charges_9months_808" end as  "Charges_9months_808",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_808" is null then '0' else  wb."Charges_12months_808" end as  "Charges_12months_808",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_810" is null then '0' else  wb."Charges_3months_810" end as  "Charges_3months_810",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_810" is null then '0' else  wb."Charges_6months_810" end as  "Charges_6months_810",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_810" is null then '0' else  wb."Charges_9months_810" end as  "Charges_9months_810",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_810" is null then '0' else  wb."Charges_12months_810" end as  "Charges_12months_810",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_392" is null then '0' else  wb."Charges_3months_392" end as  "Charges_3months_392",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_392" is null then '0' else  wb."Charges_6months_392" end as  "Charges_6months_392",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_392" is null then '0' else  wb."Charges_9months_392" end as  "Charges_9months_392",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_392" is null then '0' else  wb."Charges_12months_392" end as  "Charges_12months_392",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_395" is null then '0' else  wb."Charges_3months_395" end as  "Charges_3months_395",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_395" is null then '0' else  wb."Charges_6months_395" end as  "Charges_6months_395",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_395" is null then '0' else  wb."Charges_9months_395" end as  "Charges_9months_395",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_395" is null then '0' else  wb."Charges_12months_395" end as  "Charges_12months_395",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_459" is null then '0' else  wb."Charges_3months_459" end as  "Charges_3months_459",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_459" is null then '0' else  wb."Charges_6months_459" end as  "Charges_6months_459",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_459" is null then '0' else  wb."Charges_9months_459" end as  "Charges_9months_459",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_459" is null then '0' else  wb."Charges_12months_459" end as  "Charges_12months_459",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_880" is null then '0' else  wb."Charges_3months_880" end as  "Charges_3months_880",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_880" is null then '0' else  wb."Charges_6months_880" end as  "Charges_6months_880",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_880" is null then '0' else  wb."Charges_9months_880" end as  "Charges_9months_880",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_880" is null then '0' else  wb."Charges_12months_880" end as  "Charges_12months_880",
+                                                                                                                                                                                     CASE WHEN  wb."Charges_3months_394" is null then '0' else  wb."Charges_3months_394" end as  "Charges_3months_394",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_394" is null then '0' else  wb."Charges_6months_394" end as  "Charges_6months_394",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_394" is null then '0' else  wb."Charges_9months_394" end as  "Charges_9months_394",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_394" is null then '0' else  wb."Charges_12months_394" end as  "Charges_12months_394", 
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_426" is null then '0' else  wb."Charges_3months_426" end as  "Charges_3months_426",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_426" is null then '0' else  wb."Charges_6months_426" end as  "Charges_6months_426",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_426" is null then '0' else  wb."Charges_9months_426" end as  "Charges_9months_426",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_426" is null then '0' else  wb."Charges_12months_426" end as  "Charges_12months_426",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_3months_806" is null then '0' else  wb."Charges_3months_806" end as  "Charges_3months_806",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_6months_806" is null then '0' else  wb."Charges_6months_806" end as  "Charges_6months_806",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_9months_806" is null then '0' else  wb."Charges_9months_806" end as  "Charges_9months_806",
+                                                                                                                                                                                    CASE WHEN  wb."Charges_12months_806" is null then '0' else  wb."Charges_12months_806" end as  "Charges_12months_806",
+                                                                                                                                                                                    CASE WHEN wb."Charge_Variance_448" is null THEN '0' ELSE wb."Charge_Variance_448" END as "Charge_Variance_448",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_445" is null THEN '0' ELSE wb."Charge_Variance_445" END as "Charge_Variance_445",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_443" is null THEN '0' ELSE wb."Charge_Variance_443" END as "Charge_Variance_443",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_446" is null THEN '0' ELSE wb."Charge_Variance_446" END as "Charge_Variance_446",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_444" is null THEN '0' ELSE wb."Charge_Variance_444" END as "Charge_Variance_444",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_399" is null THEN '0' ELSE wb."Charge_Variance_399" END as "Charge_Variance_399",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_456" is null THEN '0' ELSE wb."Charge_Variance_456" END as "Charge_Variance_456",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_808" is null THEN '0' ELSE wb."Charge_Variance_808" END as "Charge_Variance_808",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_810" is null THEN '0' ELSE wb."Charge_Variance_810" END as "Charge_Variance_810",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_392" is null THEN '0' ELSE wb."Charge_Variance_392" END as "Charge_Variance_392",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_395" is null THEN '0' ELSE wb."Charge_Variance_395" END as "Charge_Variance_395",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_459" is null THEN '0' ELSE wb."Charge_Variance_459" END as "Charge_Variance_459",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_806" is null THEN '0' ELSE wb."Charge_Variance_806" END as "Charge_Variance_806",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_394" is null THEN '0' ELSE wb."Charge_Variance_394" END as "Charge_Variance_394",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_396" is null THEN '0' ELSE wb."Charge_Variance_396" END as "Charge_Variance_396",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_426" is null THEN '0' ELSE wb."Charge_Variance_426" END as "Charge_Variance_426",
+                                                                                                                                                                                   CASE WHEN wb."Charge_Variance_880" is null THEN '0' ELSE wb."Charge_Variance_880" END as "Charge_Variance_880",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_448",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_445",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_443",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_446",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_444",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_399",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_456",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_808",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_392",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_395",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_810",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_394",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_426",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_880",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_396",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_806",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_459",
+                                                                                                                                                                                                                                MONTHNAME(now()) as "Participation_Month_432",
+                                                                                                                                                                                                                                CASE WHEN wf."Late_Payment_12_444" is null THEN '0' else wf."Late_Payment_12_444" end as "Late_Payment_12_444",
+                                                                                                                                                                                    CASE WHEN wf."Late_Payment_12_445" is null THEN '0' else wf."Late_Payment_12_445" end as "Late_Payment_12_445",
+                                                                                                                                                                                    CASE WHEN wf."Late_Payment_12_446" is null THEN '0' else wf."Late_Payment_12_446" end as "Late_Payment_12_446",
+                                                                                                                                                                                    CASE WHEN wf."Late_Payment_12_808" is null THEN '0' else wf."Late_Payment_12_808" end as "Late_Payment_12_808",
+                                                                                                                                                                                     CASE WHEN wf."Late_Payment_3_444" is null THEN '0' else wf."Late_Payment_3_444" end as "Late_Payment_3_444",
+                                                                                                                                                                                    CASE WHEN wf."Late_Payment_3_445" is null THEN '0' else wf."Late_Payment_3_445" end as "Late_Payment_3_445",
+                                                                                                                                                                                    CASE WHEN wf."Late_Payment_3_446" is null THEN '0' else wf."Late_Payment_3_446" end as "Late_Payment_3_446",
+                                                                                                                                                                                    CASE WHEN wf."Late_Payment_3_808" is null THEN '0' else wf."Late_Payment_3_808" end as "Late_Payment_3_808"
+                                                                                                                                   																		from :V_ACXIOM_ACCOUNT_JN a
+                                                                                                                                   																		INNER JOIN 
+                                                                                                                                   																		:V_CUSTOMER_DETAILS ac on a."Account_Id" = ac."Account_Id"
+                                                                                                                                                                                                      LEFT OUTER JOIN :V_AGR_ZDO_HOME_SQUARE f on CAST(a."Premise_Zip" as VARCHAR(100))= CAST(f."Premise_Zip" as VARCHAR(100)) and UPPER(a."Dwelling_Type") = UPPER(f."Dwelling_Type")
+                                                                                                                                                                                                      and  a."Owner_Renter" = f."Owner_Renter"
+                                                                                                                                                                                                      LEFT OUTER JOIN 
+                                                                                                                                                                                                       :V_AGR_DO_HOME_SQUARE g on   UPPER(a."Dwelling_Type") = UPPER(g."Dwelling_Type") and  a."Owner_Renter" = g."Owner_Renter"
+                                                                                                                                                                                                      LEFT OUTER JOIN 
+                                                                                                                                                                                                      :V_PARTICIPATION_TRANSPOSE wd on  a."Account_Id" = wd."Account_Id" 
+                                                                                                                                                                                                      LEFT OUTER JOIN 
+                                                                                                                                                                                                      :V_AGR_State_city_HOME_SQUARE k on a."Premise_State" = k."Premise_State" and a."Premise_City" = k."Premise_City"
+                                                                                                                                                                                                      LEFT OUTER JOIN 
+                                                                                                                                                                                                      :V_AGR_OVERALL_HOME_SQUARE l on a."dummy" = l."dummy"
+                                                                                                                                                                                                        LEFT OUTER JOIN 
+                                                                                                                                                                                                      :LOG_RECOMMENDATION_FINAL we on a."Account_Id" = we."Account_Id"
+                                                                                                                                                                                                      LEFT OUTER JOIN
+                                                                                                                                                                                                      :V_CHARGES_FINAL_FEATURE wb ON a."Account_Id" = wb."Account_Id"
+                                                                                                                                                                                                    LEFT OUTER JOIN :V_AGR_ZDO_LOT_SQUARE yf on CAST(a."Premise_Zip" as VARCHAR(100))= CAST(yf."Premise_Zip" as VARCHAR(100)) and UPPER(a."Dwelling_Type") = UPPER(yf."Dwelling_Type")
+                                                                                                                                                                                                      and  a."Owner_Renter" = yf."Owner_Renter"
+                                                                                                                                                                                                      LEFT OUTER JOIN 
+                                                                                                                                                                                                       :V_AGR_DO_LOT_SQUARE yg on   UPPER(a."Dwelling_Type") = UPPER(yg."Dwelling_Type") and  a."Owner_Renter" = yg."Owner_Renter"
+                                                                                                                                                                                                      LEFT OUTER JOIN 
+                                                                                                                                                                                                      :V_AGR_State_city_LOT_SQUARE yk on a."Premise_State" = yk."Premise_State" and a."Premise_City" = yk."Premise_City"
+                                                                                                                                                                                                      LEFT OUTER JOIN 
+                                                                                                                                                                                                      :V_AGR_OVERALL_LOT_SQUARE yl on a."dummy" = yl."dummy"
+                                                                                                                                                                                                      LEFT OUTER JOIN 
+                                                                                                                                                                                                      "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_TRAIN_LATE_PAYMENT_ANR" wf on a."Account_Id" = wf."Account_Id"
+                                                                                                                                                                                                      where a."Adult_Age" is not null;
+                                                                                                                                                                                                      
+                                                                                                                                                                                                      
+ 
+  
+ TRUNCATE TABLE "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_PREDICTION_ANALYTICAL_RECORD" ;
+ INSERT INTO "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_PREDICTION_ANALYTICAL_RECORD"
+ ("Account_Id","Account_Number","Source_System_Cd","Owner_Renter_DW",
+"Jurisdiction_Id","Adult_Age","Length_of_Residence","Buying_Channel_Preferences_Propensity_Internet_9999",
+"Buying_Channel_Preferences_Propensity_Mail_9999","Buying_Channel_Preferences_Propensity_Phone_9999",
+"Mean_Buying_Channel_Preferences_Propensity_Phone","Mean_Buying_Channel_Preferences_Propensity_Mail",
+"Media_Channel_Usage_Internet_9999","Media_Channel_Usage_Cell_Phone_9999",
+"Media_Channel_Usage_Primetime_TV_9999","Media_Channel_Usage_Daytime_TV_9999",
+"Media_Channel_Usage_Outdoor_9999","Mean_Media_Channel_Usage_Primetime_TV",
+"Media_Channel_Usage_Radio_9999","Media_Channel_Usage_Magazine_9999","Media_Channel_Usage_Newspaper_9999",
+"Mean_Media_Channel_Usage_Internet","Mean_Media_Channel_Usage_Daytime_TV",
+"Mean_Media_Channel_Usage_Cell_Phone","Mean_Media_Channel_Usage_Magazine",
+"Mean_Media_Channel_Usage_Newspaper","Mean_Media_Channel_Usage_Outdoor",
+"Mean_Media_Channel_Usage_Radio","Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+"Mean_Buying_Channel_Preferences_Propensity_Internet","Energy_Consumer_Dynamics_Affordability_Level_Score",
+"Energy_Consumer_Dynamics_Green_Affinity_Score","Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+"Energy_Consumer_Dynamics_Investment_Capacity_Score","Energy_Consumer_Dynamics_Technology_Propensity_Score",
+"Jurisdiction","Heat_Source","Smart_Meter","Home_Square_Footage","Household_Size","OLS_Email_Indicator",
+"Population_Density","Adult_Number_in_Household","Lot_Square_Footage_Range","Owner_Renter","Home_Property_Type",
+"Year_Built","Dwelling_Type","Lot_Square_Footage","AMI_Meter","Rej448","Rej445","Rej443",
+"Rej446","Rej444","Rej399","Rej456","Rej808","Rej810","Rej392","Rej395","Rej394","Rej426","Rej880",
+"Rej396","Rej806","Rej459","Latest_flag_448","Latest_flag_445","Latest_flag_443","Latest_flag_446",
+"Latest_flag_444","Latest_flag_399","Latest_flag_456","Latest_flag_808","Latest_flag_810","Latest_flag_392",
+"Latest_flag_395","Latest_flag_394","Latest_flag_426","Latest_flag_880","Latest_flag_396","Latest_flag_806",
+"Latest_flag_459","Charges_3months_448","Charges_6months_448","Charges_9months_448","Charges_12months_448",
+"Charges_3months_445","Charges_6months_445","Charges_9months_445","Charges_12months_445","Charges_3months_443",
+"Charges_6months_443","Charges_9months_443","Charges_12months_443","Charges_3months_446","Charges_6months_446",
+"Charges_9months_446","Charges_12months_446","Charges_3months_444","Charges_6months_444","Charges_9months_444",
+"Charges_12months_444","Charges_3months_399","Charges_6months_399","Charges_9months_399","Charges_12months_399",
+"Charges_3months_456","Charges_6months_456","Charges_9months_456","Charges_12months_456",
+"Charges_3months_808","Charges_6months_808","Charges_9months_808","Charges_12months_808","Charges_3months_810",
+"Charges_6months_810","Charges_9months_810","Charges_12months_810","Charges_3months_392",
+"Charges_6months_392","Charges_9months_392","Charges_12months_392","Charges_3months_395",
+"Charges_6months_395","Charges_9months_395","Charges_12months_395","Charges_3months_459",
+"Charges_6months_459","Charges_9months_459","Charges_12months_459","Charges_3months_806",
+"Charges_6months_806","Charges_9months_806","Charges_12months_806","Charges_3months_394",
+"Charges_6months_394","Charges_9months_394","Charges_12months_394","Charges_3months_880",
+"Charges_6months_880","Charges_9months_880","Charges_12months_880","Charges_3months_426",
+"Charges_6months_426","Charges_9months_426","Charges_12months_426","Charges_3months_396",
+"Charges_6months_396","Charges_9months_396","Charges_12months_396","Late_Payment_12_444",
+"Late_Payment_12_445","Late_Payment_12_446","Late_Payment_12_808","Late_Payment_3_444",
+"Late_Payment_3_445","Late_Payment_3_446","Late_Payment_3_808","Participation_Month_448",
+"Participation_Month_445","Participation_Month_443","Participation_Month_446","Participation_Month_444",
+"Participation_Month_399","Participation_Month_456","Participation_Month_808","Participation_Month_392",
+"Participation_Month_395","Participation_Month_810","Participation_Month_394","Participation_Month_426",
+"Participation_Month_880","Participation_Month_396","Participation_Month_806","Participation_Month_459",
+"Charge_Variance_448","Charge_Variance_445","Charge_Variance_443","Charge_Variance_446","Charge_Variance_444",
+"Charge_Variance_399","Charge_Variance_456","Charge_Variance_808","Charge_Variance_392","Charge_Variance_395",
+"Charge_Variance_810","Charge_Variance_394","Charge_Variance_426","Charge_Variance_880",
+"Charge_Variance_396","Charge_Variance_806","Charge_Variance_459","g448",
+"g445", "g443","g446","g444","g399","g456", "g808",
+ "g810","g392","g395", "g394", "g426", "g880",
+ "g396","g806","g459","Jurisdiction_Name",
+ "g432",
+"Participation_Month_432",
+"Rej432",
+"Latest_flag_432",
+"kWh_Revenue","kWhs"
+ )
+select "Account_Id","Account_Number","Source_System_Cd","Owner_Renter_DW",
+null as "Jurisdiction_Id","Adult_Age","Length_of_Residence","Buying_Channel_Preferences_Propensity_Internet_9999",
+"Buying_Channel_Preferences_Propensity_Mail_9999","Buying_Channel_Preferences_Propensity_Phone_9999",
+"Mean_Buying_Channel_Preferences_Propensity_Phone","Mean_Buying_Channel_Preferences_Propensity_Mail",
+"Media_Channel_Usage_Internet_9999","Media_Channel_Usage_Cell_Phone_9999",
+"Media_Channel_Usage_Primetime_TV_9999","Media_Channel_Usage_Daytime_TV_9999",
+"Media_Channel_Usage_Outdoor_9999","Mean_Media_Channel_Usage_Primetime_TV",
+"Media_Channel_Usage_Radio_9999","Media_Channel_Usage_Magazine_9999","Media_Channel_Usage_Newspaper_9999",
+"Mean_Media_Channel_Usage_Internet","Mean_Media_Channel_Usage_Daytime_TV",
+"Mean_Media_Channel_Usage_Cell_Phone","Mean_Media_Channel_Usage_Magazine",
+"Mean_Media_Channel_Usage_Newspaper","Mean_Media_Channel_Usage_Outdoor",
+"Mean_Media_Channel_Usage_Radio","Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+"Mean_Buying_Channel_Preferences_Propensity_Internet","Energy_Consumer_Dynamics_Affordability_Level_Score",
+"Energy_Consumer_Dynamics_Green_Affinity_Score","Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+"Energy_Consumer_Dynamics_Investment_Capacity_Score","Energy_Consumer_Dynamics_Technology_Propensity_Score",
+"Jurisdiction","Heat_Source","Smart_Meter","Home_Square_Footage","Household_Size","OLS_Email_Indicator",
+"Population_Density","Adult_Number_in_Household","Lot_Square_Footage_Range","Owner_Renter","Home_Property_Type",
+"Year_Built","Dwelling_Type","Lot_Square_Footage","AMI_Meter","Rej448","Rej445","Rej443",
+"Rej446","Rej444","Rej399","Rej456","Rej808","Rej810","Rej392","Rej395","Rej394","Rej426","Rej880",
+"Rej396","Rej806","Rej459","Latest_flag_448","Latest_flag_445","Latest_flag_443","Latest_flag_446",
+"Latest_flag_444","Latest_flag_399","Latest_flag_456","Latest_flag_808","Latest_flag_810","Latest_flag_392",
+"Latest_flag_395","Latest_flag_394","Latest_flag_426","Latest_flag_880","Latest_flag_396","Latest_flag_806",
+"Latest_flag_459","Charges_3months_448","Charges_6months_448","Charges_9months_448","Charges_12months_448",
+"Charges_3months_445","Charges_6months_445","Charges_9months_445","Charges_12months_445","Charges_3months_443",
+"Charges_6months_443","Charges_9months_443","Charges_12months_443","Charges_3months_446","Charges_6months_446",
+"Charges_9months_446","Charges_12months_446","Charges_3months_444","Charges_6months_444","Charges_9months_444",
+"Charges_12months_444","Charges_3months_399","Charges_6months_399","Charges_9months_399","Charges_12months_399",
+"Charges_3months_456","Charges_6months_456","Charges_9months_456","Charges_12months_456",
+"Charges_3months_808","Charges_6months_808","Charges_9months_808","Charges_12months_808","Charges_3months_810",
+"Charges_6months_810","Charges_9months_810","Charges_12months_810","Charges_3months_392",
+"Charges_6months_392","Charges_9months_392","Charges_12months_392","Charges_3months_395",
+"Charges_6months_395","Charges_9months_395","Charges_12months_395","Charges_3months_459",
+"Charges_6months_459","Charges_9months_459","Charges_12months_459","Charges_3months_806",
+"Charges_6months_806","Charges_9months_806","Charges_12months_806","Charges_3months_394",
+"Charges_6months_394","Charges_9months_394","Charges_12months_394","Charges_3months_880",
+"Charges_6months_880","Charges_9months_880","Charges_12months_880","Charges_3months_426",
+"Charges_6months_426","Charges_9months_426","Charges_12months_426","Charges_3months_396",
+"Charges_6months_396","Charges_9months_396","Charges_12months_396","Late_Payment_12_444",
+"Late_Payment_12_445","Late_Payment_12_446","Late_Payment_12_808","Late_Payment_3_444",
+"Late_Payment_3_445","Late_Payment_3_446","Late_Payment_3_808","Participation_Month_448",
+"Participation_Month_445","Participation_Month_443","Participation_Month_446","Participation_Month_444",
+"Participation_Month_399","Participation_Month_456","Participation_Month_808","Participation_Month_392",
+"Participation_Month_395","Participation_Month_810","Participation_Month_394","Participation_Month_426",
+"Participation_Month_880","Participation_Month_396","Participation_Month_806","Participation_Month_459",
+"Charge_Variance_448","Charge_Variance_445","Charge_Variance_443","Charge_Variance_446","Charge_Variance_444",
+"Charge_Variance_399","Charge_Variance_456","Charge_Variance_808","Charge_Variance_392","Charge_Variance_395",
+"Charge_Variance_810","Charge_Variance_394","Charge_Variance_426","Charge_Variance_880",
+"Charge_Variance_396","Charge_Variance_806","Charge_Variance_459","g448",
+"g445", "g443","g446","g444","g399","g456", "g808",
+ "g810","g392","g395", "g394", "g426", "g880",
+ "g396","g806","g459","Jurisdiction_Name" ,
+  "g432",
+"Participation_Month_432",
+"Rej432",
+"Latest_flag_432", "kWh_Revenue","kWhs"
+ from :V_JN_TRANSFORM;  
+
+/*****************************************************************
+UPDATE ACCT_NUM_RELATIONSHIP TABLE
+******************************************************************/
+
+
+
+TRUNCATE TABLE "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_ACCT_NUM_ID_RELATIONSHIP";
+INSERT INTO "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_ACCT_NUM_ID_RELATIONSHIP"
+("Account_Id", 
+"Account_Number",
+"Source_System_Cd","Jurisdiction_Id","Jurisdiction","Source_Account_Id1","Source_Account_Id2_String", "Source_Account_Id2_Int",
+    "Account_Status_Cd","Account_Condition_Nm"
+)
+select  
+"Account_Id", 
+"Account_Number",
+"Source_System_Cd",
+null as "Jurisdiction_Id",
+CASE WHEN  TRIM("Jurisdiction_Name") ='NC01' THEN 'DEC-NC'
+WHEN  TRIM("Jurisdiction_Name")='NC02' THEN 'DEP-NC'
+WHEN  TRIM("Jurisdiction_Name")='SC01' THEN 'DEC-SC'
+WHEN  TRIM("Jurisdiction_Name")='SC02' THEN 'DEP-SC'
+WHEN  TRIM("Jurisdiction_Name")='FL01' THEN 'DEF'
+WHEN  TRIM("Jurisdiction_Name")='IN01' THEN 'DEI'
+WHEN  TRIM("Jurisdiction_Name")='KY01' THEN 'DEK'
+WHEN  TRIM("Jurisdiction_Name")='OH01' THEN 'DEO' END as "Jurisdiction",
+"Source_Account_Id1","Source_Account_Id2_String", "Source_Account_Id2_Int", "Account_Status_Cd" , "Account_Condition_Nm"
+from :V_CUSTOMER_DETAILS where  "Jurisdiction_Name" is not null or TRIM("Jurisdiction_Name") != '' ;
+
+insert into "CARE"."PKG_CARE.PKG_SCHEDULE::ZCARE_JOB_STATUS" values('CARE_ANR_PROC','SUCCESS',now());
+END

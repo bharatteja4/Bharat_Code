@@ -1,0 +1,214 @@
+var result = "";  
+var conn = $.db.getConnection();
+var output = {Care_Response: [] };
+function urlEncode(obj) {
+    return Object.keys(obj).map(function (key) {
+        return encodeURIComponent(key) + "=" + encodeURIComponent(obj[key]);
+    }).join("&");
+}
+function onesql(sql) {  
+try {  
+         var ps = conn.prepareStatement(sql);  
+         ps.execute();  
+         ps.close();  
+}catch(e){  
+         result += sql + ":\n" + e.toString() + "\n--------\n\n";  
+   }  
+ }  
+ 
+function getOffers(){
+    
+    var Account = $.request.parameters.get('Account');
+var Juris = $.request.parameters.get('Juris');
+var channel = $.request.parameters.get('Channel');
+var source = $.request.parameters.get('source');
+var SSN = $.request.parameters.get('SSN');
+var account_check = "";
+var error_message = "";
+var AccLen = Account.length - 1;
+if((source === "CMSE" || source === "CMSW"))
+             {account_check = Account.substring(0,AccLen);}
+        else
+             {account_check = Account;}
+    try{
+
+
+     var query_led = 'select "Product_Status" from "HANA_EE"."PKG_COMMON_MODEL.PKG_TABLE::ZPRODUCT_MASTER" where "Product_Id" =449';
+     var pc_led = conn.prepareCall(query_led);
+     pc_led.execute();
+     var rs_led = pc_led.getResultSet();
+     
+     while (rs_led.next()) {
+               var record_led = {};
+                record_led.Product_Status = rs_led.getString(1);
+   
+   if (record_led.Product_Status == 'Active' && Account !== "")    
+    //if (record_led.Product_Status == 'Active')  
+{
+    
+   var d1 = new Date();
+     var s1 = d1.getSeconds();
+     var ms1 = d1.getMilliseconds()/1000;
+     var m1 = d1.getMinutes() * 60;
+
+    var cdp_start = m1 + s1 + ms1 ;
+    
+     var dest_cdp = $.net.http.readDestination("PKG_CARE.PKG_ODATA", "CDP_Call");   
+     
+     var request_cdp = new $.net.http.Request($.net.http.POST, "");
+	var payload1 = {
+  "AccountNumber": Account,
+  "PhoneNumber": "",
+  "Last4TaxId": SSN,
+  "IsCsr": "False"
+ //"Action": "LEDStatusPublic"
+  // API CDP Changes 
+};
+  	
+	request_cdp.setBody(JSON.stringify(payload1));
+	request_cdp.contentType = "application/json";
+	
+	var client = new $.net.http.Client();
+	
+ 
+	client.request(request_cdp, dest_cdp);
+	var response1 = client.getResponse();
+	var res1 = response1.body.asString();
+	
+var d2 = new Date();
+ var s2 = d2.getSeconds();
+     var ms2 = d2.getMilliseconds()/1000;
+     var m2 = d2.getMinutes() * 60;
+    var cdp_end = m2 + s2 + ms2 ;
+
+var cdp_time = cdp_end - cdp_start;
+
+	onesql("INSERT INTO \"PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_CDP_LOG\" VALUES(now(),'"+Account+"','"+source+"','"+channel+"','"+Juris+"','"+cdp_time+"')");
+	
+ var JSONLED = JSON.parse(res1);
+                var LEDLen = JSONLED.EligibilityAccountData.length;
+                onesql("CREATE LOCAL TEMPORARY TABLE #Led_Table(ELIGIBILITY_CODE NVARCHAR(12), MAX_BULB INTEGER, MIN_BULB INTEGER)");
+   
+    for (var j = 0; j < LEDLen; j++){
+        var LED = JSONLED.EligibilityAccountData[j];
+        onesql("INSERT INTO #Led_Table VALUES('"+LED.EligibilityStatusCode+"', '"+LED.MaxUnitCount+"', '"+LED.MinUnitCount+"')");
+    }
+    
+    }
+    
+
+    else 
+{
+    onesql("CREATE LOCAL TEMPORARY TABLE #Led_Table(ELIGIBILITY_CODE NVARCHAR(12), MAX_BULB INTEGER, MIN_BULB INTEGER)");
+}
+    
+}
+}catch(e){
+        error_message = e.message;
+    	onesql("CREATE LOCAL TEMPORARY TABLE #Led_Table(ELIGIBILITY_CODE NVARCHAR(12), MAX_BULB INTEGER, MIN_BULB INTEGER)");
+    	onesql("INSERT INTO \"PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_API_ERRORLOG\" VALUES('"+Account+"', '"+source+"','CDP LED','"+error_message+"',now())");
+}
+
+
+
+    try {  
+ 
+    var query = 'CALL "CARE"."PKG_CARE.PKG_PROCEDURE::CARE_PREDICT_REG_PROC"(?, ?, ?, ?, #Led_Table, ?)';
+    
+    var pc = conn.prepareCall(query);
+    pc.setString(1, account_check);
+    pc.setString(2, Juris);
+    pc.setString(3, channel);
+    pc.setString(4, source);
+
+    pc.execute();
+    var rs = pc.getResultSet();
+    var care_response = {};
+    var aresult = [];
+     while (rs.next()) {
+               care_response.ACCOUNT_NUMBER = rs.getString(1);
+               care_response.SOURCE_SYSTEM_CD = rs.getString(2);
+               care_response.OWNER_RENTER_HEADER_LEVEL = rs.getString(4);
+               
+                   //  }
+    // while (rs.next()) {
+               var record = {};
+              //record.ACCOUNT_NUMBER = rs.getString(1);
+                //record.SOURCE_SYSTEM_CD = rs.getString(2);
+                record.REGULATED = rs.getString(3);
+                //record.OWNER_RENTER_HEADER_LEVEL = rs.getString(4);
+                record.PRODUCT_ID = rs.getString(5);
+                record.COMMERCE_PRODUCT_ID = rs.getString(6);
+                record.PRODUCT_NAME = rs.getString(7);
+                record.PRODUCT_PRICE_OFFERING = rs.getString(8);
+                record.PRODUCT_HINTS_AND_REMINDERS = rs.getString(9);
+                record.OWNER_RENTER_PRODUCT_LEVEL = rs.getString(10);
+                record.SCORE = rs.getString(11);
+                record.ACCEPT_REFERRAL_FLAG = rs.getString(12);
+                record.LINE_OF_BUSINESS = rs.getString(13);
+                record.INSTALLATION_FEE = rs.getString(14);
+                record.ELIGIBLE_FLAG = rs.getString(15);
+                record.RANK = rs.getString(16);
+                record.Upgrade_Downgrade_Flag = rs.getString(17);
+                record.Product_Family_Name = rs.getString(18);
+                
+      aresult.push(record);
+        }
+                care_response.results = aresult;
+                output.Care_Response.push(care_response);
+
+
+
+    /*while (rs.next()) {
+  
+               var record = {};
+              record.ACCOUNT_NUMBER = rs.getString(1);
+                record.SOURCE_SYSTEM_CD = rs.getString(2);
+                record.REGULATED = rs.getString(3);
+                record.OWNER_RENTER_HEADER_LEVEL = rs.getString(4);
+                record.PRODUCT_ID = rs.getString(5);
+                record.COMMERCE_PRODUCT_ID = rs.getString(6);
+                record.PRODUCT_NAME = rs.getString(7);
+                record.PRODUCT_PRICE_OFFERING = rs.getString(8);
+                record.PRODUCT_HINTS_AND_REMINDERS = rs.getString(9);
+                record.OWNER_RENTER_PRODUCT_LEVEL = rs.getString(10);
+                record.SCORE = rs.getString(11);
+                record.ACCEPT_REFERRAL_FLAGL = rs.getString(12);
+                record.LINE_OF_BUSINESSL = rs.getString(13);
+                record.INSTALLATION_FEE = rs.getString(14);
+                record.ELIGIBLE_FLAG = rs.getString(15);
+                record.RANK = rs.getString(16);
+                output.results.push(record);
+      
+        }*/
+        conn.commit();
+        rs.close();
+
+        pc.close();
+        conn.close();
+    }catch(e){ 
+    $.response.status = $.net.http.INTERNAL_SERVER_ERROR;
+       $.response.setBody('Invalid Command: ', aCmd);
+       error_message = e.message;
+       onesql("INSERT INTO \"PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_API_ERRORLOG\" VALUES('"+Account+"', '"+source+"','CARE PROCEDURE FAILURE','"+error_message+"',now())");
+
+        conn.commit();
+        
+    }                
+var body = JSON.stringify(output);
+
+    $.response.contentType = 'application/json';
+    $.response.setBody(body);
+    $.response.headers.set("Access-Control-Allow-Origin", "*");
+    $.response.status = $.net.http.OK;
+ }
+ var aCmd = $.request.parameters.get('cmd');
+switch (aCmd) {
+    case "select":
+       getOffers();
+       break;
+    default:
+        $.response.status = $.net.http.INTERNAL_SERVER_ERROR;
+       $.response.setBody('Invalid Command: ', aCmd);
+    
+} 

@@ -1,0 +1,267 @@
+PROCEDURE "CARE"."PKG_CARE.PKG_PROCEDURE.PKG_TRAINING::ZCARE_GB_TRAINING_392_PROC" ( ) 
+   LANGUAGE SQLSCRIPT 
+    AS
+
+BEGIN
+
+DECLARE check_1 VARCHAR(1);
+DECLARE predict_count INTEGER;
+DECLARE DATETIME_PARTICIPATION_MAX TIMESTAMP;
+DECLARE DATETIME_PARTICIPATION_MIN TIMESTAMP; 
+DECLARE positive_count INTEGER;
+DECLARE negative_count INTEGER;
+DECLARE count_training INTEGER;
+DECLARE min_ga_date TIMESTAMP;
+DECLARE max_row_pos INTEGER;  
+DECLARE check_12 VARCHAR(1);
+DECLARE V_MODEL TABLE ("ROW_INDEX" INTEGER,"KEY" NVARCHAR(1000),"VALUE" NVARCHAR(1000));
+DECLARE V_VARIABLE_IMPORTANCE TABLE ("VARIABLE_NAME" NVARCHAR(256), IMPORTANCE DOUBLE);
+DECLARE V_CONFUSION_MATRIX TABLE ("ACTUAL_CLASS" NVARCHAR(1000), "PREDICTED_CLASS" NVARCHAR(1000), "COUNT" INTEGER);
+DECLARE V_STATS TABLE ("STAT_NAME" NVARCHAR(1000), "STAT_VALUE" NVARCHAR(1000));
+DECLARE V_CROSS_VALIDATE TABLE ("PARAM_NAME" NVARCHAR(256), "INT_VALUE" INTEGER ,  "DOUBLE_VALUE" DOUBLE , "STRING_VALUE" NVARCHAR(1000));
+DECLARE V_PREDICT TABLE ("Account_Id" INTEGER, "SCORE" NVARCHAR(100) , "CONFIDENCE" DOUBLE );
+DECLARE V_AUC TABLE ("STAT_NAME" NVARCHAR(100), "STAT_VALUE" DOUBLE);
+DECLARE V_ROC TABLE ("ID" INTEGER , "FPR" DOUBLE, "TPR" DOUBLE);
+DECLARE V_COEFF_LOG TABLE ("VARIABLE_NAME" Nvarchar(1000),"COEFFICIENT" DOUBLE,"Z_SCORE" DOUBLE, "P_VALUE" DOUBLE);
+DECLARE V_STATS_LOG TABLE ("STAT_NAME" NVARCHAR(256), "STAT_VALUE" NVARCHAR(1000));
+DECLARE V_PMML_LOG TABLE ("ROW_INDEX" INTEGER, "MODEL_CONTENT" CLOB);
+DECLARE V_PLACE_LOG TABLE ("PARAM_NAME" NVARCHAR(256), "INT_VALUE" INTEGER, "DOUBLE_VALUE" DOUBLE , "STRING_VALUE" NVARCHAR(1000));
+DECLARE V_OUTPUT_LOG TABLE ("Account_Id" INTEGER, "SCORE" DOUBLE , "CLASS" VARCHAR(1));
+
+
+DECLARE V_SAMPLE_OUT392 TABLE ("Account_Id" INTEGER,"Adult_Age" DOUBLE,"Adult_Number_in_Household" DOUBLE,"Energy_Consumer_Dynamics_Affordability_Level_Score" DOUBLE,
+"Energy_Consumer_Dynamics_Comfort_Consumption_Score" DOUBLE,
+"Energy_Consumer_Dynamics_Green_Affinity_Score" DOUBLE,"Energy_Consumer_Dynamics_Info_Action_Orientation_Score" DOUBLE,
+"Energy_Consumer_Dynamics_Investment_Capacity_Score" DOUBLE,"Energy_Consumer_Dynamics_Technology_Propensity_Score" DOUBLE,
+"Heat_Source" NVARCHAR(5000),"Home_Property_Type" NVARCHAR(5000),"Home_Square_Footage" DOUBLE,"Household_Size" DOUBLE,"Jurisdiction" NVARCHAR(5000),"Participation_Month_392"
+NVARCHAR(20),
+"Latest_flag_392" NVARCHAR(1),"Rej392" DOUBLE,"g396" NVARCHAR(1), "g443" NVARCHAR(1), "g456" NVARCHAR(1), "g808" NVARCHAR(1),
+"Charges_3months_392" DOUBLE,"Charges_6months_392" DOUBLE,"Charges_9months_392" DOUBLE,"Charges_12months_392" DOUBLE,
+"Charge_Variance_392" DOUBLE,
+"Year_Built" NVARCHAR(5000),"Length_of_Residence" DOUBLE,"Buying_Channel_Preferences_Propensity_Internet_9999" DOUBLE,
+"Buying_Channel_Preferences_Propensity_Mail_9999" DOUBLE,"Buying_Channel_Preferences_Propensity_Phone_9999" DOUBLE,
+"Media_Channel_Usage_Cell_Phone_9999" DOUBLE,"Media_Channel_Usage_Daytime_TV_9999" DOUBLE,
+"Media_Channel_Usage_Internet_9999" DOUBLE,"Media_Channel_Usage_Newspaper_9999" DOUBLE,
+"Media_Channel_Usage_Primetime_TV_9999" DOUBLE,
+"g392"  NVARCHAR(1)); --10,11,14,15,16 18 19 20 21 27 37
+
+ V_ELIGIBLE = select distinct a."Account_Id","Group_Id" from "HANA_EE"."PKG_COMMON_MODEL.PKG_TABLE::ZPROD_ELIGIBILITY" a
+			 INNER JOIN 
+			 "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MAP_PRODUCT" b
+			 on a."Product_Id" = b."Sub_Group_Id";
+			 
+
+/***************************
+GRADIENT BOOSTING
+***************************/
+/***************************************************************************************
+Running Training Model for GROUP_ID 392
+***************************************************************************************/
+
+
+ITAB_CREATE_DATASET_POS_392 = select "Account_Id","Adult_Age","Adult_Number_in_Household","Energy_Consumer_Dynamics_Affordability_Level_Score","Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+"Energy_Consumer_Dynamics_Green_Affinity_Score","Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+"Energy_Consumer_Dynamics_Investment_Capacity_Score","Energy_Consumer_Dynamics_Technology_Propensity_Score",
+"Heat_Source","Home_Property_Type","Home_Square_Footage","Household_Size","Jurisdiction","Participation_Month_392",
+"Latest_flag_392","Rej392","g396", "g443", "g456" , "g808" ,
+"Charges_3months_392","Charges_6months_392","Charges_9months_392","Charges_12months_392",
+"Charge_Variance_392",
+"Year_Built","Length_of_Residence","Buying_Channel_Preferences_Propensity_Internet_9999",
+"Buying_Channel_Preferences_Propensity_Mail_9999","Buying_Channel_Preferences_Propensity_Phone_9999",
+"Media_Channel_Usage_Cell_Phone_9999","Media_Channel_Usage_Daytime_TV_9999",
+"Media_Channel_Usage_Internet_9999","Media_Channel_Usage_Newspaper_9999",
+"Media_Channel_Usage_Primetime_TV_9999",
+"g392" from "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_TRAINING_ANALYTICAL_RECORD"  where "g392" = '1';
+
+ITAB_CREATE_DATASET_NEG_392 = select a."Account_Id","Adult_Age","Adult_Number_in_Household","Energy_Consumer_Dynamics_Affordability_Level_Score","Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+"Energy_Consumer_Dynamics_Green_Affinity_Score","Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+"Energy_Consumer_Dynamics_Investment_Capacity_Score","Energy_Consumer_Dynamics_Technology_Propensity_Score",
+"Heat_Source","Home_Property_Type","Home_Square_Footage","Household_Size","Jurisdiction","Participation_Month_392",
+"Latest_flag_392","Rej392","g396", "g443", "g456" , "g808" ,
+"Charges_3months_392","Charges_6months_392","Charges_9months_392","Charges_12months_392",
+"Charge_Variance_392",
+"Year_Built","Length_of_Residence","Buying_Channel_Preferences_Propensity_Internet_9999",
+"Buying_Channel_Preferences_Propensity_Mail_9999","Buying_Channel_Preferences_Propensity_Phone_9999",
+"Media_Channel_Usage_Cell_Phone_9999","Media_Channel_Usage_Daytime_TV_9999",
+"Media_Channel_Usage_Internet_9999","Media_Channel_Usage_Newspaper_9999",
+"Media_Channel_Usage_Primetime_TV_9999",
+"g392" from "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_TRAINING_ANALYTICAL_RECORD"   a 
+INNER JOIN 
+:V_ELIGIBLE b ON a."Account_Id" = b."Account_Id" where "g392" = '0';
+    
+
+select "count" into positive_count  from (select count(*) as "count"   from :ITAB_CREATE_DATASET_POS_392);
+select "count" into negative_count from (select count(*) as "count"   from :ITAB_CREATE_DATASET_NEG_392);
+
+                            
+if :positive_count >= :negative_count
+THEN 
+count_training := CEIL(:negative_count/2);
+predict_count := CEIL((:negative_count - :count_training)/5);
+ELSE 
+count_training := CEIL(:positive_count/2);
+predict_count := CEIL((:positive_count - :count_training)/5);
+END IF; 
+
+UPDATE "CARE"."PKG_CARE.PKG_TABLES.PKG_PARAMETER::ZCARE_SAMPLE_PARAM" 
+SET "INT_VALUE" = :count_training
+WHERE "PARAM_NAME" = 'SAMPLING_SIZE' and "PRODUCT_ID" = '392';
+
+SAMPLING_PARAMETER = select "PARAM_NAME","INT_VALUE","DOUBLE_VALUE","STRING_VALUE" from "CARE"."PKG_CARE.PKG_TABLES.PKG_PARAMETER::ZCARE_SAMPLE_PARAM"
+where "PRODUCT_ID" = '392';
+
+CALL "_SYS_AFL"."PAL_SAMPLING"(:ITAB_CREATE_DATASET_POS_392, :SAMPLING_PARAMETER , V_SAMPLE_OUT392);
+
+V_SAMPLE_392_POS = select * from :V_SAMPLE_OUT392;
+
+CALL "_SYS_AFL"."PAL_SAMPLING"(:ITAB_CREATE_DATASET_NEG_392, :SAMPLING_PARAMETER , V_SAMPLE_OUT392);
+
+V_SAMPLE_392_NEG = select * from :V_SAMPLE_OUT392;
+
+
+/*********************************************
+TRAIN MODEL FOR PRODUCT 392
+**********************************************/
+
+TRAINING_DATA_392 = select "Adult_Age","Adult_Number_in_Household","Energy_Consumer_Dynamics_Affordability_Level_Score","Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+"Energy_Consumer_Dynamics_Green_Affinity_Score","Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+"Energy_Consumer_Dynamics_Investment_Capacity_Score","Energy_Consumer_Dynamics_Technology_Propensity_Score",
+"Heat_Source","Home_Property_Type","Home_Square_Footage","Household_Size","Jurisdiction","Participation_Month_392",
+"Latest_flag_392","Rej392","g396", "g443", "g456" , "g808" ,
+"Charges_3months_392","Charges_6months_392","Charges_9months_392","Charges_12months_392",
+"Charge_Variance_392",
+"Year_Built","Length_of_Residence","Buying_Channel_Preferences_Propensity_Internet_9999",
+"Buying_Channel_Preferences_Propensity_Mail_9999","Buying_Channel_Preferences_Propensity_Phone_9999",
+"Media_Channel_Usage_Cell_Phone_9999","Media_Channel_Usage_Daytime_TV_9999",
+"Media_Channel_Usage_Internet_9999","Media_Channel_Usage_Newspaper_9999",
+"Media_Channel_Usage_Primetime_TV_9999",
+"g392" from :V_SAMPLE_392_POS
+UNION ALL
+select "Adult_Age","Adult_Number_in_Household","Energy_Consumer_Dynamics_Affordability_Level_Score","Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+"Energy_Consumer_Dynamics_Green_Affinity_Score","Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+"Energy_Consumer_Dynamics_Investment_Capacity_Score","Energy_Consumer_Dynamics_Technology_Propensity_Score",
+"Heat_Source","Home_Property_Type","Home_Square_Footage","Household_Size","Jurisdiction","Participation_Month_392",
+"Latest_flag_392","Rej392","g396", "g443", "g456" , "g808" ,
+"Charges_3months_392","Charges_6months_392","Charges_9months_392","Charges_12months_392",
+"Charge_Variance_392",
+"Year_Built","Length_of_Residence","Buying_Channel_Preferences_Propensity_Internet_9999",
+"Buying_Channel_Preferences_Propensity_Mail_9999","Buying_Channel_Preferences_Propensity_Phone_9999",
+"Media_Channel_Usage_Cell_Phone_9999","Media_Channel_Usage_Daytime_TV_9999",
+"Media_Channel_Usage_Internet_9999","Media_Channel_Usage_Newspaper_9999",
+"Media_Channel_Usage_Primetime_TV_9999",
+"g392" from :V_SAMPLE_392_NEG;
+
+PARAMETER = select * from "CARE"."PKG_CARE.PKG_TABLES.PKG_PARAMETER::ZCARE_GRAD_BOOST_TRAIN_PARAM";
+
+INSERT INTO "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_TRAIN_GBANR392"(
+    "Adult_Age","Adult_Number_in_Household","Energy_Consumer_Dynamics_Affordability_Level_Score",
+"Energy_Consumer_Dynamics_Comfort_Consumption_Score","Energy_Consumer_Dynamics_Green_Affinity_Score",
+"Energy_Consumer_Dynamics_Info_Action_Orientation_Score","Energy_Consumer_Dynamics_Investment_Capacity_Score",
+"Energy_Consumer_Dynamics_Technology_Propensity_Score","Heat_Source","Home_Property_Type",
+"Home_Square_Footage","Household_Size","Jurisdiction","Participation_Month_392",
+"Latest_flag_392","Rej392","g396","g443","g456","g808","Charges_3months_392","Charges_6months_392",
+"Charges_9months_392","Charges_12months_392","Year_Built","Length_of_Residence",
+"Buying_Channel_Preferences_Propensity_Internet_9999","Buying_Channel_Preferences_Propensity_Mail_9999",
+"Buying_Channel_Preferences_Propensity_Phone_9999","Media_Channel_Usage_Internet_9999",
+"Media_Channel_Usage_Cell_Phone_9999","Media_Channel_Usage_Primetime_TV_9999",
+"Media_Channel_Usage_Daytime_TV_9999","Media_Channel_Usage_Newspaper_9999",
+"Charge_Variance_392","g392","DateTime") 
+select "Adult_Age","Adult_Number_in_Household","Energy_Consumer_Dynamics_Affordability_Level_Score",
+"Energy_Consumer_Dynamics_Comfort_Consumption_Score","Energy_Consumer_Dynamics_Green_Affinity_Score",
+"Energy_Consumer_Dynamics_Info_Action_Orientation_Score","Energy_Consumer_Dynamics_Investment_Capacity_Score",
+"Energy_Consumer_Dynamics_Technology_Propensity_Score","Heat_Source","Home_Property_Type",
+"Home_Square_Footage","Household_Size","Jurisdiction","Participation_Month_392",
+"Latest_flag_392","Rej392","g396","g443","g456","g808","Charges_3months_392","Charges_6months_392",
+"Charges_9months_392","Charges_12months_392","Year_Built","Length_of_Residence",
+"Buying_Channel_Preferences_Propensity_Internet_9999","Buying_Channel_Preferences_Propensity_Mail_9999",
+"Buying_Channel_Preferences_Propensity_Phone_9999","Media_Channel_Usage_Internet_9999",
+"Media_Channel_Usage_Cell_Phone_9999","Media_Channel_Usage_Primetime_TV_9999",
+"Media_Channel_Usage_Daytime_TV_9999","Media_Channel_Usage_Newspaper_9999",
+"Charge_Variance_392","g392",now() as "DateTime" from :TRAINING_DATA_392;
+
+
+EXEC 'DROP TABLE "CARE"."TRAINING_DATA_GB_392"';
+CREATE COLUMN TABLE "CARE"."TRAINING_DATA_GB_392" as (select * from :TRAINING_DATA_392);
+
+TRAINING_DATA_392_NEW = select "Adult_Age","Adult_Number_in_Household","Energy_Consumer_Dynamics_Affordability_Level_Score","Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+"Energy_Consumer_Dynamics_Green_Affinity_Score","Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+"Energy_Consumer_Dynamics_Investment_Capacity_Score","Energy_Consumer_Dynamics_Technology_Propensity_Score",
+"Heat_Source","Home_Property_Type","Home_Square_Footage","Household_Size","Jurisdiction","Participation_Month_392",
+"Latest_flag_392","Rej392","g396", "g443", "g456" , "g808" ,
+"Charges_3months_392","Charges_6months_392","Charges_9months_392","Charges_12months_392",
+"Charge_Variance_392",
+"Year_Built","Length_of_Residence","Buying_Channel_Preferences_Propensity_Internet_9999",
+"Buying_Channel_Preferences_Propensity_Mail_9999","Buying_Channel_Preferences_Propensity_Phone_9999",
+"Media_Channel_Usage_Cell_Phone_9999","Media_Channel_Usage_Daytime_TV_9999",
+"Media_Channel_Usage_Internet_9999","Media_Channel_Usage_Newspaper_9999",
+"Media_Channel_Usage_Primetime_TV_9999",
+"g392" from "CARE"."TRAINING_DATA_GB_392";
+
+CALL _SYS_AFL.PAL_GBDT(:TRAINING_DATA_392_NEW, :PARAMETER , V_MODEL, V_VARIABLE_IMPORTANCE,V_CONFUSION_MATRIX, V_STATS,V_CROSS_VALIDATE);
+
+
+DELETE FROM  "CARE"."PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_GRAD_BOOST_MODEL" where "GROUP_ID" = '392';
+INSERT INTO "CARE"."PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_GRAD_BOOST_MODEL"  (select * , '392' as "GROUP_ID", 'Y' as "UNIVERSAL_CONSENT_FLAG",
+now() as "DATETIME" from :V_MODEL);
+INSERT INTO "CARE"."PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_GRAD_BOOST_IMPORTANCE_HIST" (select *, '392' as "GROUP_ID",
+now() as "DATETIME" from :V_VARIABLE_IMPORTANCE);
+INSERT INTO "CARE"."PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_GRAD_BOOST_MODEL_HIST"  (select * , '392' as "GROUP_ID", 'Y' as "UNIVERSAL_CONSENT_FLAG",
+now() as "DATETIME" from :V_MODEL);
+
+/*****************************************************************************************
+PREDICT OUTPUT FOR PRODUCT 392
+*****************************************************************************************/
+
+                              
+INPUT_DATA_392 = select "Account_Id","Adult_Age","Adult_Number_in_Household","Energy_Consumer_Dynamics_Affordability_Level_Score","Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+                  "Energy_Consumer_Dynamics_Green_Affinity_Score","Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+                  "Energy_Consumer_Dynamics_Investment_Capacity_Score","Energy_Consumer_Dynamics_Technology_Propensity_Score",
+                  "Heat_Source","Home_Property_Type","Home_Square_Footage","Household_Size","Jurisdiction","Participation_Month_392",
+                  "Latest_flag_392","Rej392","g396", "g443", "g456" , "g808" ,
+                  "Charges_3months_392","Charges_6months_392","Charges_9months_392","Charges_12months_392",
+                        "Charge_Variance_392",
+                  "Year_Built","Length_of_Residence","Buying_Channel_Preferences_Propensity_Internet_9999",
+                  "Buying_Channel_Preferences_Propensity_Mail_9999","Buying_Channel_Preferences_Propensity_Phone_9999",
+                        "Media_Channel_Usage_Cell_Phone_9999","Media_Channel_Usage_Daytime_TV_9999",
+                        "Media_Channel_Usage_Internet_9999","Media_Channel_Usage_Newspaper_9999",
+                        "Media_Channel_Usage_Primetime_TV_9999"
+                        from ( 
+                         (select * from :ITAB_CREATE_DATASET_POS_392 where "Account_Id" NOT IN (select "Account_Id" from :V_SAMPLE_392_POS)
+                ORDER BY RAND() LIMIT :predict_count)
+                        UNION
+                        (select * from :ITAB_CREATE_DATASET_NEG_392 where "Account_Id" NOT IN (select "Account_Id" from :V_SAMPLE_392_NEG)
+                ORDER BY RAND() LIMIT :predict_count));
+                        
+PREDICT_PARAMETER = select * from "CARE"."PKG_CARE.PKG_TABLES.PKG_PARAMETER::ZCARE_GRAD_BOOST_PRED_PARAM";
+
+MODEL_DATA392 = select "ROW_INDEX","KEY","VALUE" from "CARE"."PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_GRAD_BOOST_MODEL"  where "GROUP_ID"='392';
+
+CALL _SYS_AFL.PAL_GBDT_PREDICT(:INPUT_DATA_392,:MODEL_DATA392, :PREDICT_PARAMETER, V_PREDICT );
+
+V_PREDICTION_392 = select * , 'Energywise Home (EWH)' as "Product_Name" from :V_PREDICT;
+
+/****************************************
+AREA UNDER CURVE FOR 392
+****************************************/
+
+V_AUC_INPUT = select a."Account_Id",CAST("g392" as INTEGER) as "ORIGINAL",CAST("SCORE" as DOUBLE) as "PREDICT" from :V_PREDICTION_392 a
+                       INNER JOIN "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_TRAINING_ANALYTICAL_RECORD" b
+                       on a."Account_Id" = b."Account_Id" ORDER BY "g392";
+                       
+
+V_AUC_PARAM = select * from "CARE"."PKG_CARE.PKG_TABLES.PKG_PARAMETER::ZCARE_AUC_PARAM";
+
+
+CALL _SYS_AFL.PAL_AUC(:V_AUC_INPUT,:V_AUC_PARAM,V_AUC,V_ROC); 
+
+
+
+INSERT INTO "CARE"."PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_AUC_OUTPUT" ( select CONCAT("STAT_NAME",'_GB'), "STAT_VALUE" , '392' as "GROUP_ID"
+,now() as "DATETIME" from :V_AUC);
+
+insert into "CARE"."PKG_CARE.PKG_SCHEDULE::ZCARE_JOB_STATUS" values('ZCARE_GB_TRAINING_392_PROC','SUCCESS',now());
+COMMIT; 
+END;
+
+
+

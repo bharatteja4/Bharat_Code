@@ -1,0 +1,225 @@
+PROCEDURE "CARE"."PKG_CARE.PKG_PROCEDURE::CARE_TRAIN_PARTICIPATION_PROC" ( )
+   LANGUAGE SQLSCRIPT
+    AS
+BEGIN
+   /*************************************
+       Write your procedure logic 
+   *************************************/
+   
+      
+      
+DECLARE DATETIME_PARTICIPATION_MAX TIMESTAMP;
+DECLARE DATETIME_PARTICIPATION_MIN TIMESTAMP;   
+   
+   
+select "Config_Value_Timestamp" into DATETIME_PARTICIPATION_MAX from "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MODEL_CONFIGURATION"
+where "Configuration_Name"='DATETIME_PARTICIPATION_MAX';
+
+select "Config_Value_Timestamp" into DATETIME_PARTICIPATION_MIN from "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MODEL_CONFIGURATION"
+where "Configuration_Name"='DATETIME_PARTICIPATION_MIN';
+   
+   V_PARTICIPATION =   select "ACCOUNT_ID","ID","PARTICIPATION_DATE" from (
+                                  select "ACCOUNT_ID", b."Group_Id" as "ID","PARTICIPATION_DATE",
+                                  row_number() over (partition by "ACCOUNT_ID","Group_Id" order by "ACCOUNT_ID","Group_Id","PARTICIPATION_DATE") as "ROW" from 
+                                   (select "ACCOUNT_ID","ID","PARTICIPATION_DATE" from (
+                     select "Account_Id" as "ACCOUNT_ID","Product_Id" AS "ID","Participation_Dt" as "PARTICIPATION_DATE" ,
+                         row_number() over (partition by "Account_Id" ,"Product_Id"
+                         order by "Account_Id" ,"Product_Id" ,"Participation_Dt"   DESC) as "rn" 
+                         from "HANA_EE"."PKG_COMMON_MODEL.PKG_TABLE_FUNCTION::ZGLOBTF_PARTICIPATION"()
+                         where "Participation_Dt" <=  :DateTime_Participation_Max  and "Participation_Dt" >= :DateTime_Participation_Min ) where "rn"='1') a
+                       INNER JOIN "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MAP_PRODUCT" b
+                       on b."Sub_Group_Id" = a."ID") where "ROW" = '1';
+    
+    V_PARTICIPATION_NEG = select "Account_Id" , "Product_Id" , "Negative_Participation_Date" from "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_NEGATIVE_PARTICIPATION";
+    
+    /*
+    
+    V_LOB_PARTICIPATED = select "Account_Id","Line_Of_Business" , count("Product_Id") as "Participated_Product_Count" from ( 
+                        select a."Account_Id",a."Product_Id", b."Line_Of_Business"  from (select distinct "Account_Id" ,"Product_Id"
+                         from "HANA_EE"."PKG_COMMON_MODEL.PKG_TABLE_FUNCTION::ZGLOBTF_PARTICIPATION"()) a
+                         INNER JOIN
+                         "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MAP_PRODUCT" b on a."Product_Id" = b."Sub_Group_Id") GROUP BY "Account_Id","Line_Of_Business";
+                         
+                         
+    V_LOB_TOTAL = select "Line_Of_Business", count("Sub_Group_Id") as "Total_Products" from "CARE"."PKG_CARE.PKG_TABLES.PKG_CONFIGURATION::ZCARE_MAP_PRODUCT" GROUP BY "Line_Of_Business";
+    
+    V_LOB_PARTCICIPATION_JN =   select "Account_Id","Line_Of_Business","Participated_Product_Count"/"Total_Products" as "Participation_Ratio" from (
+                                select a."Line_Of_Business", "Total_Products" , b."Account_Id","Participated_Product_Count"
+                                from :V_LOB_TOTAL a
+                                LEFT OUTER JOIN
+                                :V_LOB_PARTICIPATED b on a."Line_Of_Business" = b."Line_Of_Business");
+                                
+    
+    V_LOB_TRANSPOSE =   select a."Account_Id",
+                        b."Participation_Ratio" as "Participation_Ratio_EE", 
+                        c."Participation_Ratio" as "Participation_Ratio_BP",
+                        d."Participation_Ratio" as "Participation_Ratio_DR", 
+                        e."Participation_Ratio" as "Participation_Ratio_ECS", 
+                        f."Participation_Ratio" as "Participation_Ratio_RS"
+                        from 
+                        (select distinct "Account_Id" from :V_LOB_PARTICIPATED) a
+                        LEFT OUTER JOIN 
+                        (select "Account_Id","Participation_Ratio" from :V_LOB_PARTCICIPATION_JN where "Line_Of_Business" = 'EE') b
+                        on a."Account_Id" = b."Account_Id"
+                         LEFT OUTER JOIN 
+                        (select "Account_Id","Participation_Ratio" from :V_LOB_PARTCICIPATION_JN where "Line_Of_Business" = 'B&P') c
+                        on a."Account_Id" = c."Account_Id"
+                         LEFT OUTER JOIN 
+                        (select "Account_Id","Participation_Ratio" from :V_LOB_PARTCICIPATION_JN where "Line_Of_Business" = 'DR') d
+                        on a."Account_Id" = d."Account_Id"
+                         LEFT OUTER JOIN 
+                        (select "Account_Id","Participation_Ratio" from :V_LOB_PARTCICIPATION_JN where "Line_Of_Business" = 'ECS') e
+                        on a."Account_Id" = e."Account_Id"
+                         LEFT OUTER JOIN 
+                        (select "Account_Id","Participation_Ratio" from :V_LOB_PARTCICIPATION_JN where UPPER("Line_Of_Business") = 'RES SOLUTIONS') f
+                        on a."Account_Id" = f."Account_Id";
+                        
+    */
+
+                       
+                       
+    /*********************************************************************
+PARTICIPATION DATA  FOR TRAINING
+**********************************************************************/
+
+V_PARTICIPATION_TRANSPOSE =     select "ACCOUNT_ID" as "Account_Id", 
+                                                sum(cast("PARTICIPATION_448" as INTEGER )) as "g448",
+                                                sum(cast("PARTICIPATION_445" as INTEGER )) as "g445",
+                                                sum(cast("PARTICIPATION_443" as INTEGER )) as "g443",
+                                                sum(cast("PARTICIPATION_446" as INTEGER )) as "g446",
+                                                sum(cast("PARTICIPATION_444" as INTEGER )) as "g444",
+                                                sum(cast("PARTICIPATION_399" as INTEGER )) as "g399",
+                                                sum(cast("PARTICIPATION_456" as INTEGER )) as "g456",
+                                                sum(cast("PARTICIPATION_808" as INTEGER )) as "g808",
+                                                sum(cast("PARTICIPATION_392" as INTEGER )) as "g392",
+                                                sum(cast("PARTICIPATION_395" as INTEGER )) as "g395",
+                                                sum(cast("PARTICIPATION_810" as INTEGER )) as "g810",
+                                                sum(cast("PARTICIPATION_394" as INTEGER )) as "g394",
+                                                sum(cast("PARTICIPATION_426" as INTEGER )) as "g426",
+                                                sum(cast("PARTICIPATION_880" as INTEGER )) as "g880",
+                                                sum(cast("PARTICIPATION_396" as INTEGER )) as "g396",
+                                                sum(cast("PARTICIPATION_806" as INTEGER )) as "g806",
+                                                sum(cast("PARTICIPATION_459" as INTEGER )) as "g459",
+                                                sum(cast("PARTICIPATION_432" as INTEGER )) as "g432"
+                                                from (
+                                                select "ACCOUNT_ID",
+                                                CASE WHEN "ID" = '448' THEN '1' ELSE '0' END as "PARTICIPATION_448",
+                                                CASE WHEN "ID" = '445' THEN '1' ELSE '0' END as "PARTICIPATION_445",
+                                                CASE WHEN "ID" = '443' THEN '1' ELSE '0' END as "PARTICIPATION_443",
+                                                CASE WHEN "ID" = '446' THEN '1' ELSE '0' END as "PARTICIPATION_446",
+                                                CASE WHEN "ID" = '444' THEN '1' ELSE '0' END as "PARTICIPATION_444",
+                                                CASE WHEN "ID" = '399' THEN '1' ELSE '0' END as "PARTICIPATION_399",
+                                                CASE WHEN "ID" = '456' THEN '1' ELSE '0' END as "PARTICIPATION_456",
+                                                CASE WHEN "ID" = '808' THEN '1' ELSE '0' END as "PARTICIPATION_808",
+                                                CASE WHEN "ID" = '392' THEN '1' ELSE '0' END as "PARTICIPATION_392",
+                                                CASE WHEN "ID" = '395' THEN '1' ELSE '0' END as "PARTICIPATION_395",
+                                                CASE WHEN "ID" = '810' THEN '1' ELSE '0' END as "PARTICIPATION_810",
+                                                CASE WHEN "ID" = '394' THEN '1' ELSE '0' END as "PARTICIPATION_394",
+                                                CASE WHEN "ID" = '426' THEN '1' ELSE '0' END as "PARTICIPATION_426",
+                                                CASE WHEN "ID" = '880' THEN '1' ELSE '0' END as "PARTICIPATION_880",
+                                                CASE WHEN "ID" = '396' THEN '1' ELSE '0' END as "PARTICIPATION_396",
+                                                CASE WHEN "ID" = '806' THEN '1' ELSE '0' END as "PARTICIPATION_806",
+                                                CASE WHEN "ID" = '459' THEN '1' ELSE '0' END as "PARTICIPATION_459",
+                                                CASE WHEN "ID" = '432' THEN '1' ELSE '0' END as "PARTICIPATION_432"
+                                                from :V_PARTICIPATION) GROUP BY "ACCOUNT_ID";
+                                                
+                                            
+V_TOTAL_PARTICIPATION = select "Account_Id","Product_Id" as "ID","Negative_Participation_Date" as "PARTICIPATION_DATE" from :V_PARTICIPATION_NEG
+                            UNION
+                         select "ACCOUNT_ID" as "Account_Id","ID", "PARTICIPATION_DATE" from :V_PARTICIPATION;
+                         
+V_PARTICIPATION_MONTH =    select "Account_Id", sum(cast("PARTICIPATION_MONTH_448" as INTEGER )) as "PARTICIPATION_MONTH_448",
+                                                sum(cast("PARTICIPATION_MONTH_445" as INTEGER )) as "PARTICIPATION_MONTH_445",
+                                                sum(cast("PARTICIPATION_MONTH_443" as INTEGER )) as "PARTICIPATION_MONTH_443",
+                                                sum(cast("PARTICIPATION_MONTH_446" as INTEGER )) as "PARTICIPATION_MONTH_446",
+                                                sum(cast("PARTICIPATION_MONTH_444" as INTEGER )) as "PARTICIPATION_MONTH_444",
+                                                sum(cast("PARTICIPATION_MONTH_399" as INTEGER )) as "PARTICIPATION_MONTH_399",
+                                                sum(cast("PARTICIPATION_MONTH_456" as INTEGER )) as "PARTICIPATION_MONTH_456",
+                                                sum(cast("PARTICIPATION_MONTH_808" as INTEGER )) as "PARTICIPATION_MONTH_808",
+                                                sum(cast("PARTICIPATION_MONTH_392" as INTEGER )) as "PARTICIPATION_MONTH_392",
+                                                sum(cast("PARTICIPATION_MONTH_395" as INTEGER )) as "PARTICIPATION_MONTH_395",
+                                                sum(cast("PARTICIPATION_MONTH_810" as INTEGER )) as "PARTICIPATION_MONTH_810",
+                                                sum(cast("PARTICIPATION_MONTH_394" as INTEGER )) as "PARTICIPATION_MONTH_394",
+                                                sum(cast("PARTICIPATION_MONTH_426" as INTEGER )) as "PARTICIPATION_MONTH_426",
+                                                sum(cast("PARTICIPATION_MONTH_880" as INTEGER )) as "PARTICIPATION_MONTH_880",
+                                                sum(cast("PARTICIPATION_MONTH_396" as INTEGER )) as "PARTICIPATION_MONTH_396",
+                                                sum(cast("PARTICIPATION_MONTH_806" as INTEGER )) as "PARTICIPATION_MONTH_806",
+                                                sum(cast("PARTICIPATION_MONTH_459" as INTEGER )) as "PARTICIPATION_MONTH_459",
+                                                sum(cast("PARTICIPATION_MONTH_432" as INTEGER )) as "PARTICIPATION_MONTH_432"
+                                                from (
+                                                 select "Account_Id", 
+                                                CASE WHEN "ID" = '448' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_448",
+                                                CASE WHEN "ID" = '445' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_445",
+                                                CASE WHEN "ID" = '443' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_443",
+                                                CASE WHEN "ID" = '446' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_446",
+                                                CASE WHEN "ID" = '444' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_444",
+                                                CASE WHEN "ID" = '399' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_399",
+                                                CASE WHEN "ID" = '456' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_456",
+                                                CASE WHEN "ID" = '808' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_808",
+                                                CASE WHEN "ID" = '392' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_392",
+                                                CASE WHEN "ID" = '395' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_395",
+                                                CASE WHEN "ID" = '810' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_810",
+                                                CASE WHEN "ID" = '394' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_394",
+                                                CASE WHEN "ID" = '426' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_426",
+                                                CASE WHEN "ID" = '880' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_880",
+                                                CASE WHEN "ID" = '396' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_396",
+                                                CASE WHEN "ID" = '806' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_806",
+                                                CASE WHEN "ID" = '459' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_459",
+                                                CASE WHEN "ID" = '432' THEN EXTRACT(MONTH FROM "PARTICIPATION_DATE") ELSE '0' END as "PARTICIPATION_MONTH_432" 
+                                                from :V_TOTAL_PARTICIPATION) GROUP BY "Account_Id";
+
+
+V_PARTICIPATION_MONTH_FINAL = select "Account_Id", CASE WHEN "PARTICIPATION_MONTH_448" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_448"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_448",
+                                CASE WHEN "PARTICIPATION_MONTH_445" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_445"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_445",
+                                CASE WHEN "PARTICIPATION_MONTH_443" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_443"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_443",
+                                CASE WHEN "PARTICIPATION_MONTH_446" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_446"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_446",
+                                CASE WHEN "PARTICIPATION_MONTH_444" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_444"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_444",
+                                CASE WHEN "PARTICIPATION_MONTH_399" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_399"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_399",
+                                CASE WHEN "PARTICIPATION_MONTH_456" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_456"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_456",
+                                CASE WHEN "PARTICIPATION_MONTH_808" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_808"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_808",
+                                CASE WHEN "PARTICIPATION_MONTH_392" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_392"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_392",
+                                CASE WHEN "PARTICIPATION_MONTH_395" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_395"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_395",
+                                CASE WHEN "PARTICIPATION_MONTH_810" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_810"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_810",
+                                CASE WHEN "PARTICIPATION_MONTH_394" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_394"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_394",
+                                CASE WHEN "PARTICIPATION_MONTH_426" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_426"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_426",
+                                CASE WHEN "PARTICIPATION_MONTH_880" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_880"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_880",
+                                CASE WHEN "PARTICIPATION_MONTH_396" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_396"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_396",
+                                CASE WHEN "PARTICIPATION_MONTH_806" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_806"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_806",
+                                CASE WHEN "PARTICIPATION_MONTH_459" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_459"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_459",
+                                CASE WHEN "PARTICIPATION_MONTH_432" BETWEEN 1 AND 12 THEN MONTHNAME(CONCAT(CONCAT('2018.',"PARTICIPATION_MONTH_432"),'.01')) ELSE UNKNOWN END as "PARTICIPATION_MONTH_432"
+                                from :V_PARTICIPATION_MONTH;
+                                
+
+V_FINAL_FEATURE = select a."Account_Id","g448","g445","g443","g446","g444","g399","g456","g808",
+                "g810","g392","g395","g394","g426","g880","g396","g806","g459", "PARTICIPATION_MONTH_448",
+                "PARTICIPATION_MONTH_445","PARTICIPATION_MONTH_443","PARTICIPATION_MONTH_446","PARTICIPATION_MONTH_444",
+                "PARTICIPATION_MONTH_399","PARTICIPATION_MONTH_456","PARTICIPATION_MONTH_808","PARTICIPATION_MONTH_392",
+                "PARTICIPATION_MONTH_395","PARTICIPATION_MONTH_810","PARTICIPATION_MONTH_394","PARTICIPATION_MONTH_426",
+                "PARTICIPATION_MONTH_880","PARTICIPATION_MONTH_396","PARTICIPATION_MONTH_806","PARTICIPATION_MONTH_459",
+                "g432","PARTICIPATION_MONTH_432"
+                
+                from :V_PARTICIPATION_MONTH_FINAL a
+                 LEFT OUTER JOIN 
+                :V_PARTICIPATION_TRANSPOSE c on a."Account_Id" = c."Account_Id";
+
+
+
+INSERT INTO "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_TRAIN_PARTICIPATION_ANR" ( 
+    "Account_Id","g448","g445","g443","g446","g444","g399","g456","g808",
+"g810","g392","g395","g394","g426","g880","g396","g806","g459","PARTICIPATION_MONTH_448",
+"PARTICIPATION_MONTH_445","PARTICIPATION_MONTH_443","PARTICIPATION_MONTH_446","PARTICIPATION_MONTH_444","PARTICIPATION_MONTH_399",
+"PARTICIPATION_MONTH_456","PARTICIPATION_MONTH_808","PARTICIPATION_MONTH_392","PARTICIPATION_MONTH_395","PARTICIPATION_MONTH_810",
+"PARTICIPATION_MONTH_394","PARTICIPATION_MONTH_426","PARTICIPATION_MONTH_880","PARTICIPATION_MONTH_396","PARTICIPATION_MONTH_806",
+"PARTICIPATION_MONTH_459", "g432","PARTICIPATION_MONTH_432")
+select "Account_Id","g448","g445","g443","g446","g444","g399","g456","g808",
+"g810","g392","g395","g394","g426","g880","g396","g806","g459","PARTICIPATION_MONTH_448",
+"PARTICIPATION_MONTH_445","PARTICIPATION_MONTH_443","PARTICIPATION_MONTH_446","PARTICIPATION_MONTH_444","PARTICIPATION_MONTH_399",
+"PARTICIPATION_MONTH_456","PARTICIPATION_MONTH_808","PARTICIPATION_MONTH_392","PARTICIPATION_MONTH_395","PARTICIPATION_MONTH_810",
+"PARTICIPATION_MONTH_394","PARTICIPATION_MONTH_426","PARTICIPATION_MONTH_880","PARTICIPATION_MONTH_396","PARTICIPATION_MONTH_806",
+"PARTICIPATION_MONTH_459", "g432","PARTICIPATION_MONTH_432"  from :V_FINAL_FEATURE;
+
+
+
+
+
+END

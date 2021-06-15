@@ -1,0 +1,39 @@
+PROCEDURE "CARE"."PKG_CARE.PKG_PROCEDURE.PKG_PREDICTION::ZCARE_GB_SCORING_392" (
+    OUT V_PREDICT392 TABLE ("Account_Id" INTEGER, "SCORE" NVARCHAR(100) , "CONFIDENCE" DOUBLE ))
+   LANGUAGE SQLSCRIPT
+    AS
+BEGIN
+   /*************************************
+       Write your procedure logic 
+   *************************************/
+   
+
+
+/*****************************************************************************************
+PREDICT OUTPUT FOR PRODUCT 392
+*****************************************************************************************/
+
+INPUT_DATA_392 = select "Account_Id","Adult_Age","Adult_Number_in_Household","Energy_Consumer_Dynamics_Affordability_Level_Score","Energy_Consumer_Dynamics_Comfort_Consumption_Score",
+                  "Energy_Consumer_Dynamics_Green_Affinity_Score","Energy_Consumer_Dynamics_Info_Action_Orientation_Score",
+                  "Energy_Consumer_Dynamics_Investment_Capacity_Score","Energy_Consumer_Dynamics_Technology_Propensity_Score",
+                  "Heat_Source","Home_Property_Type","Home_Square_Footage","Household_Size","Jurisdiction","Participation_Month_392",
+                  "Latest_flag_392","Rej392","g396", "g443", "g456" , "g808" ,
+                  "Charges_3months_392","Charges_6months_392","Charges_9months_392","Charges_12months_392",
+                        "Charge_Variance_392",
+                  "Year_Built","Length_of_Residence","Buying_Channel_Preferences_Propensity_Internet_9999",
+                  "Buying_Channel_Preferences_Propensity_Mail_9999","Buying_Channel_Preferences_Propensity_Phone_9999",
+                        "Media_Channel_Usage_Cell_Phone_9999","Media_Channel_Usage_Daytime_TV_9999",
+                        "Media_Channel_Usage_Internet_9999","Media_Channel_Usage_Newspaper_9999",
+                        "Media_Channel_Usage_Primetime_TV_9999"
+                        from  "CARE"."PKG_CARE.PKG_TABLES.PKG_ANALYTICAL_RECORD::ZCARE_PREDICTION_ANALYTICAL_RECORD";
+                                    
+  PREDICT_PARAMETER = select * from "CARE"."PKG_CARE.PKG_TABLES.PKG_PARAMETER::ZCARE_GRAD_BOOST_PRED_PARAM";
+                        
+MODEL_DATA392 = select "ROW_INDEX","KEY","VALUE" from "CARE"."PKG_CARE.PKG_TABLES.PKG_MODEL_OUTPUT::ZCARE_GRAD_BOOST_MODEL" where "GROUP_ID"='392';
+
+
+CALL _SYS_AFL.PAL_GBDT_PREDICT(:INPUT_DATA_392,:MODEL_DATA392, :PREDICT_PARAMETER, V_PREDICT392);
+
+insert into "CARE"."PKG_CARE.PKG_SCHEDULE::ZCARE_JOB_STATUS" values('ZCARE_GB_SCORING_392','SUCCESS',now());
+   
+END
